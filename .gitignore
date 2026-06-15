@@ -1,0 +1,25 @@
+# secrets — the cardinal sin
+.env
+*.env
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# local vector store / db data
+chroma_data/
+*.sqlite3
+
+# editor / os
+.vscode/
+.DS_Store
+
+# tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# my personal log
+DEVLOG.md
