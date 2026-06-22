@@ -122,3 +122,10 @@ LLM Client
  - we use AsyncClient for the session pools because we do the same https call over and over again 
  - AsyncClient is injected - expensive, more testable, follows the projects architecture
  - not owned by LLMClient, owned by caller
+
+FastAPI
+ - documents accpted as JSONs - no document parsing 
+ - used routes for clean architecture 
+
+FastAPI deferred
+ - upload documents 

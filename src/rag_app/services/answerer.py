@@ -6,6 +6,10 @@ from rag_app.llm.prompter import build_prompt
 
 from rag_app.config import get_settings
 
+from rag_app.schemas import DocumentDTO
+
+from uuid import UUID
+
 class AnswerService:
     # DI
     def __init__(self, llm_client: LLMClient, retriever: RetrievalService) -> None:
@@ -20,3 +24,7 @@ class AnswerService:
             return "There is not enough context to generate a good answer"
         prompt = build_prompt(query, top_k)
         return await self.llm_client.generate(prompt)
+    async def get_document_content(self, id: UUID) -> str:
+        return await self.retriever.get_document_content(id)
+    async def get_document(self, id: UUID) -> DocumentDTO:
+        return await self.retriever.get_document_DTO(id)

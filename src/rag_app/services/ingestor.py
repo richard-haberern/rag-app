@@ -43,7 +43,5 @@ class IngestionService:
         vectors = self.embedder.embed_document(chunks) 
         # store vectors - expects tuple(id, Embedding)
         await self.vec_store.add_vectors([(ch.id, vector) for ch, vector in zip(chunk_dtos, vectors, strict=True)])
-    async def get_document_content(self, id: UUID) -> str:
-        return await self.doc_store.get_document_content(id)
     
     

@@ -1,14 +1,20 @@
 from rag_app.stores.vector_store import VectorStore
 from rag_app.stores.chunk_store import ChunkStore
+from rag_app.stores.document_store import DocStore
 
 from rag_app.chunkings.chunker import Chunker
 from rag_app.embeddings.embedder import Embedder
 
+from rag_app.schemas import DocumentDTO
+
+from uuid import UUID
+
 class RetrievalService:
     # all DI
-    def __init__(self, chunk_store: ChunkStore, vector_store: VectorStore, embedder: Embedder, chunker: Chunker) -> None:
+    def __init__(self, chunk_store: ChunkStore, vector_store: VectorStore, doc_store: DocStore, embedder: Embedder, chunker: Chunker) -> None:
         self.chunk_store = chunk_store
         self.vec_store = vector_store
+        self.doc_store = doc_store
         self.embedder = embedder
         self.chunker = chunker
 
@@ -22,5 +28,8 @@ class RetrievalService:
         k_vectors = await self.vec_store.search(q_vector, k)
         k_chunks = await self.chunk_store.get_chunks_by_ids([ch_id for ch_id, _ in k_vectors])
         return [ch.content for ch in k_chunks]
-    
+    async def get_document_content(self, id: UUID) -> str:
+        return await self.doc_store.get_document_content(id)
+    async def get_document_DTO(self, id: UUID) -> DocumentDTO:
+        return await self.doc_store.get_document(id)
      
