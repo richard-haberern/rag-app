@@ -129,3 +129,17 @@ FastAPI
 
 FastAPI deferred
  - upload documents 
+
+
+Stores
+ - services own the session_makers and they begin and end the transactions
+ - sessions are past to the stores methods - we gain atomicity on writes while still keeping swappable seam
+   for the vector store 
+ - added a small overhead on read operations + a bit more plumbing = services have to begin and end sessions
+
+Document
+ - storing hash of the content for dedup - two docs are duplicate if they have the same content
+ - rejecting non character documents
+
+No self-heal prefer Document dedup to self-heal = we store document and chunks without the vectors - try to store it again to get the vectors 
+we can't because of the dedup

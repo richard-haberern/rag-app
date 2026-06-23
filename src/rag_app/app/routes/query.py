@@ -6,11 +6,13 @@ from pydantic import BaseModel
 from uuid import UUID
 
 from rag_app.app.deps import get_answerer
+from rag_app.app.deps import get_retriever
 
 from rag_app.services.answerer import AnswerService
+from rag_app.services.retriever import RetrievalService
 
-from rag_app.llm import LLMClient
-from rag_app.stores.document_store import DocStore
+from rag_app.stores.document_store import get_file_content_from_path
+from os.path import isfile
 
 router = APIRouter(prefix="/query")
 
@@ -20,15 +22,15 @@ class DocumentResponse(BaseModel):
     doc_id: UUID
     doc_metadata: dict
 
-class GenereateRequest(BaseModel):
+class GenerateRequest(BaseModel):
     query: str
 
-@router.post("/generate/")
-async def generate_answer(q: GenereateRequest, answerer: Annotated[AnswerService, Depends(get_answerer)]) -> str:
+@router.post("/generate")
+async def generate_answer(q: GenerateRequest, answerer: Annotated[AnswerService, Depends(get_answerer)]) -> str:
     return await answerer.get_answer(q.query)
 
 @router.get("/documents/{doc_id}")
-async def get_document(doc_id: UUID, answerer: Annotated[AnswerService, Depends(get_answerer)]) -> DocumentResponse:
-    doc_DTO = await answerer.get_document(doc_id)
-    doc_content = await answerer.get_document_content(doc_id)
-    return DocumentResponse(filename=doc_DTO.filename, content=doc_content, doc_id=doc_DTO.id, doc_metadata=doc_DTO.doc_metadata)
+async def get_document(doc_id: UUID, retriever: Annotated[RetrievalService, Depends(get_retriever)]) -> DocumentResponse:
+    doc = await retriever.get_document(doc_id)
+    doc_content = await get_file_content_from_path(doc.path_raw_content)
+    return DocumentResponse(filename=doc.filename, content=doc_content, doc_id=doc.id, doc_metadata=doc.doc_metadata)

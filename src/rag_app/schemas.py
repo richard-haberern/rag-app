@@ -11,6 +11,7 @@ class DocumentDTO:
     id: UUID
     filename: str
     path_raw_content: str
+    content_hash: str
     # without this all instances without metadata would share the same empty {}
     doc_metadata: dict[str, Any] = field(default_factory=dict) 
 

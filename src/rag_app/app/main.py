@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from httpx import AsyncClient
 
@@ -29,11 +30,11 @@ async def lifespan(app: FastAPI):
     app.state.embedder = Embedder()
     app.state.chunker = build_chunker(app.state.embedder)
     app.state.llm_client = build_llm_client(app.state.http)
-    app.state.chunk_store = ChunkStore(app.state.session_maker)
-    app.state.doc_store = DocStore(app.state.session_maker)
-    app.state.vec_store = VectorStore(app.state.session_maker)
-    app.state.ingestor = IngestionService(app.state.doc_store, app.state.chunk_store, app.state.vec_store, app.state.embedder, app.state.chunker)
-    app.state.retriever = RetrievalService(app.state.chunk_store, app.state.vec_store, app.state.doc_store, app.state.embedder, app.state.chunker)
+    app.state.chunk_store = ChunkStore()
+    app.state.doc_store = DocStore()
+    app.state.vec_store = VectorStore()
+    app.state.ingestor = IngestionService(app.state.doc_store, app.state.chunk_store, app.state.vec_store, app.state.embedder, app.state.chunker, app.state.session_maker)
+    app.state.retriever = RetrievalService(app.state.chunk_store, app.state.vec_store, app.state.doc_store, app.state.embedder, app.state.chunker, app.state.session_maker)
     app.state.answerer = AnswerService(app.state.llm_client, app.state.retriever)
     
     yield
@@ -49,3 +50,17 @@ app = FastAPI(
 )
 app.include_router(ingest.router)
 app.include_router(query.router)
+
+
+# Service/store layers signal failures with plain exceptions; translate them to HTTP here so
+# they don't surface as opaque 500s. ValueError = bad input (over-long query, invalid/empty
+# path). OSError = a referenced file is gone. NOTE: document-not-found is also a ValueError, so
+# it currently maps to 400, not 404 — a precise 404 needs a dedicated NotFoundError (deferred).
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(OSError)
+async def os_error_handler(request: Request, exc: OSError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": str(exc)})

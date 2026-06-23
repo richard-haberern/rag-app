@@ -7,16 +7,19 @@ from rag_app.embeddings.embedder import Embedder
 
 from rag_app.schemas import DocumentDTO
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from uuid import UUID
 
 class RetrievalService:
     # all DI
-    def __init__(self, chunk_store: ChunkStore, vector_store: VectorStore, doc_store: DocStore, embedder: Embedder, chunker: Chunker) -> None:
+    def __init__(self, chunk_store: ChunkStore, vector_store: VectorStore, doc_store: DocStore, embedder: Embedder, chunker: Chunker, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.chunk_store = chunk_store
         self.vec_store = vector_store
         self.doc_store = doc_store
         self.embedder = embedder
         self.chunker = chunker
+        self._session_factory = session_factory
 
     #later need to add threshold
     async def search_topk_chunks(self, query: str, k: int) -> list[str]:
@@ -25,11 +28,18 @@ class RetrievalService:
         if q_size > self.chunker.max_size:
             raise ValueError(f"Your query is too long {q_size}, max size for query is {self.chunker.max_size}")
         q_vector: list[float] = self.embedder.embed_query(query)[0]
-        k_vectors = await self.vec_store.search(q_vector, k)
-        k_chunks = await self.chunk_store.get_chunks_by_ids([ch_id for ch_id, _ in k_vectors])
-        return [ch.content for ch in k_chunks]
+        async with self._session_factory.begin() as session:
+            k_vectors = await self.vec_store.search(session, q_vector, k)
+            k_chunks = await self.chunk_store.get_chunks_by_ids(session, [ch_id for ch_id, _ in k_vectors])
+        # have to sort chunks by the vectors -> O(n)
+        by_id = {ch.id: ch for ch in k_chunks}
+        ordered_content = [by_id[ch_id].content for ch_id, _ in k_vectors if ch_id in by_id]
+        return ordered_content
+    
     async def get_document_content(self, id: UUID) -> str:
-        return await self.doc_store.get_document_content(id)
-    async def get_document_DTO(self, id: UUID) -> DocumentDTO:
-        return await self.doc_store.get_document(id)
+        async with self._session_factory.begin() as session:
+            return await self.doc_store.get_document_content(session, id)
+    async def get_document(self, id: UUID) -> DocumentDTO:
+        async with self._session_factory.begin() as session:
+            return await self.doc_store.get_document(session, id)
      

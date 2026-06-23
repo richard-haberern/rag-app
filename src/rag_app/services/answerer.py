@@ -24,7 +24,3 @@ class AnswerService:
             return "There is not enough context to generate a good answer"
         prompt = build_prompt(query, top_k)
         return await self.llm_client.generate(prompt)
-    async def get_document_content(self, id: UUID) -> str:
-        return await self.retriever.get_document_content(id)
-    async def get_document(self, id: UUID) -> DocumentDTO:
-        return await self.retriever.get_document_DTO(id)
