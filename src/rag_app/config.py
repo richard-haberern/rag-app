@@ -12,9 +12,11 @@ class Settings(BaseSettings):
     # no need for password
     db_user: str = "postgres"
     db_password: str | None = None
+    db_password_test: str | None = None
     db_host: str = "localhost"
     db_port: int = 5432
     db_name: str = "ragdb"
+    db_name_test: str | None = None
     # Optional full override; if set, takes precedence over the DB_* parts above.
     database_url: str | None = None
 
@@ -51,7 +53,19 @@ class Settings(BaseSettings):
             f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
-
+    @property
+    def sqlalchemy_url_test(self) -> str:
+        # Deliberately ignores database_url: the test URL must be built from the
+        # explicit DB_*_TEST parts so the suite's TRUNCATE/DROP can never alias prod
+        # via a stray DATABASE_URL. (Flag for DECISIONS.md.)
+        if self.db_password_test is None:
+            raise ValueError("DB_PASSWORD_TEST is required to build the test database URL")
+        if self.db_name_test is None:
+            raise ValueError("DB_NAME_TEST is required to build the test database URL")
+        return (
+            f"postgresql+asyncpg://{self.db_user}:{self.db_password_test}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name_test}"
+        )
 
 @lru_cache
 def get_settings() -> Settings:

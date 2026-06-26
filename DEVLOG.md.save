@@ -1,0 +1,46 @@
+===============v1=======================
+Don't return ORM objects - the session closes and the object is dead -> loaded attributes OK, lazy attributes - raises an Error 
+ - flooding the system with backend = BAD
+Don't create a new session pool in each store
+ - use async_sessionmaker(expire_on_commit=False)
+ - one overall session_maker all the stores use it
+ - expire on commit - the object expire after commit, with sync OK a new connection is created when accessing the attribute
+   in async BAD because it can't be awaited = raises error -> expire_on_commit=False
+ - don't hardcode engine + password in one store
+Don't put passwords etc. hardcoded into the code
+ - use env variable and store it in .env file which is .gitignored
+When deleting through ORM - SQLAlchemy - session.del()
+ - I have to have cascade set if not - raises error
+ - set it in the ORM object mapping
+
+__init.py__ - needs to be in a directory to be a package
+ - 1. mark a directory as a package - signal that we can do from app.storage import VectorStore
+ - 2. runs when the module is first imported - package's constructor
+ - 3. optionally controls package's public surface - where __all__ lives
+ - import side effects - hard to reason -> if we put some code inside the __init__.py file
+__all__ - what's public
+ - list of strings naming the public symbols of a module/package
+ - controls what `from package import *` pulls in
+ - list of names this package chooses to expose as its public API
+private things
+ - leading `_` - convention only
+CC's take on this session
+Storage + embedding layer. 
+ - Refactored the hand-written draft into subpackages (db/, models/, stores/, embeddings/). 
+ - Fixed the Vector.id→chunk_id mismatch, moved DB creds to .env, shared one async engine (expire_on_commit=False), 
+added cascades, Chunk.position, Document JSONB metadata, dim/length guards. Hard rule: no ORM objects cross a store boundary — stores speak DTOs. 
+ - Learned: Python type hints aren't runtime contracts, and pgvector deserializes vectors back as numpy ndarray regardless of input, 
+so reads need explicit float() coercion to honor list[float] (and to stay JSON-serializable).
+
+
+
+
+TESTS:
+ - pure logic (no infra) - 
+    - chunking, promptbuilder
+ - I/O seams
+    - embedder, all three stores, retriver, llm client, ingest/query services, endpoints
+- emebedder faked with a dummy constant = store, ingest
+- real embedder in the retrieval tests - load once per test suite not once per test
+- one test for the retrieval with hand placed vectors to test the distance/top-k logic in isolation from the model
+- trunctuate the DB after tests so all start from deterministic DB state

@@ -34,7 +34,7 @@ class ChunkStore:
     async def get_chunks_by_ids(self, session: AsyncSession, ids: Sequence[UUID]) -> list[ChunkDTO]:
         # Text-fetch half of two-step retrieval. Order is not guaranteed here; the caller
         # holds the (chunk_id, distance) ranking from VectorStore.search.
-        result = await session.execute(select(Chunk).where(Chunk.id.in_(ids)))
+        result = await session.execute(select(Chunk).where(Chunk.id.in_(ids)).order_by(Chunk.position))
         return [_to_dto(c) for c in result.scalars()]
 
     async def get_chunks_by_document(self, session: AsyncSession, document_id: UUID) -> list[ChunkDTO]:
@@ -43,4 +43,7 @@ class ChunkStore:
             .where(Chunk.document_id == document_id)
             .order_by(Chunk.position)
         )
-        return [_to_dto(c) for c in result.scalars()]
+        chunks = list(result.scalars())
+        if not chunks:
+            raise ValueError(f"No chunks to document with {document_id}")
+        return [_to_dto(c) for c in chunks]

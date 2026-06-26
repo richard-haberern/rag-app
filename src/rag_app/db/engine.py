@@ -3,8 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from rag_app.config import get_settings
 
 # factory function that exposes engine
-def make_engine() -> AsyncEngine:
-    return create_async_engine(get_settings().sqlalchemy_url)
+def make_engine(url: str | None = None) -> AsyncEngine:
+    if url is None:
+        url = get_settings().sqlalchemy_url
+    return create_async_engine(url)
 
 # factory function that exposes the session_maker
 # expire_on_commit=False: in async we must avoid implicit lazy-load I/O triggered by
