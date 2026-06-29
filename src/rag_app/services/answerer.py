@@ -1,14 +1,8 @@
+from rag_app.config import get_settings
 from rag_app.llm import LLMClient
-
+from rag_app.llm.prompter import build_prompt
 from rag_app.services.retriever import RetrievalService
 
-from rag_app.llm.prompter import build_prompt
-
-from rag_app.config import get_settings
-
-from rag_app.schemas import DocumentDTO
-
-from uuid import UUID
 
 class AnswerService:
     # DI

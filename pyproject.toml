@@ -14,6 +14,9 @@ dependencies = [
     # encode_document / encode_query methods - for some models neccessary - require sentence-transformers v5+
     "sentence-transformers>=5.0",
     "pydantic-settings>=2.0",
+    "uvicorn>=0.49",
+    "fastapi>=0.138.0",
+    "httpx>=0.27",
 ]
 
 # Test-only deps. Already present in .venv but were undeclared; pin loosely so the suite is

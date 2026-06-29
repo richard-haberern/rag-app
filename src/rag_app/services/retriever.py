@@ -1,15 +1,14 @@
-from rag_app.stores.vector_store import VectorStore
-from rag_app.stores.chunk_store import ChunkStore
-from rag_app.stores.document_store import DocStore
-
-from rag_app.chunkings.chunker import Chunker
-from rag_app.embeddings.embedder import Embedder
-
-from rag_app.schemas import DocumentDTO
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from uuid import UUID
+from rag_app.chunkings.chunker import Chunker
+from rag_app.embeddings.embedder import Embedder
+from rag_app.schemas import DocumentDTO
+from rag_app.stores.chunk_store import ChunkStore
+from rag_app.stores.document_store import DocStore
+from rag_app.stores.vector_store import VectorStore
+
 
 class RetrievalService:
     # all DI

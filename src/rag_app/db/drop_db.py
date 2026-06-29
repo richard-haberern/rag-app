@@ -1,9 +1,8 @@
-from rag_app.db.bootstrap import init_db
+from rag_app.db.bootstrap import drop_db
 from asyncio import run
 
-
 def main():
-    run(init_db())
-
+    run(drop_db())
+    
 if __name__ == "__main__":
     main()

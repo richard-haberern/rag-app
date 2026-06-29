@@ -94,62 +94,78 @@ flowchart LR
 
 ## Quickstart
 
-<!-- FLAG: I do NOT know your actual run steps, env var names, or Python version.
-     Everything in this section is a plausible guess — replace with what actually
-     works on a clean checkout. A broken quickstart is the fastest way to look junior. -->
-
-**Prerequisites:** Python <!-- FLAG: version -->, PostgreSQL with the `pgvector`
-extension installed.
+**Prerequisites:** Docker + Docker Compose.
 
 ```bash
-# 1. Install
-pip install -e .
+# 1. Create a .env (compose auto-loads it)
+cat > .env <<'EOF'
+POSTGRES_PASSWORD=change-me
+LLM_API_KEY=your-gemini-api-key   # required — generation calls Gemini
+EOF
 
-# 2. Configure (see .env.example)   <!-- FLAG: do you have one? -->
-export DATABASE_URL=postgresql+asyncpg://...
-export GEMINI_API_KEY=...           # <!-- FLAG: exact var name? -->
+# 2. Build and start the stack (db + api)
+docker compose up --build
+```
 
-# 3. Create the schema
-# <!-- FLAG: what's the actual command? a script? a startup hook? -->
+> ⏳ **First build/run is slow.** The api image installs **PyTorch** (~a few GB), and
+> on first startup the embedding model is downloaded. Expect several minutes the first
+> time — later runs are fast.
 
-# 4. Run
-uvicorn <!-- FLAG: app import path -->:app --reload
+Once it's up:
+
+- 🌐 API → <http://localhost:8000>
+- 📖 Interactive docs (Swagger) → <http://localhost:8000/docs>
+
+The database schema (pgvector extension + tables) is created automatically on startup.
+
+### Run locally (without Docker)
+
+```bash
+pip install -e .                       # needs Python 3.12
+# Postgres with pgvector running; set DB_PASSWORD + LLM_API_KEY in .env
+uvicorn rag_app.api.main:app --reload
 ```
 
 ### Example
 
-<!-- FLAG: I don't know your endpoint paths or request/response shapes.
-     Fill in real curl examples — this is the part an engineer will actually try. -->
+A full ingest → ask → fetch round-trip:
 
 ```bash
-# Ingest a document
-curl -X POST http://localhost:8000/<...> ...
+# 1. Ingest a document — returns its id
+curl -X POST http://localhost:8000/ingest/store \
+  -H "Content-Type: application/json" \
+  -d '{
+        "filename": "pangram.txt",
+        "content": "The quick brown fox jumps over the lazy dog.",
+        "metadata": {"source": "demo"}
+      }'
+# → "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
-# Ask a question
-curl -X POST http://localhost:8000/<...> ...
+# 2. Ask a question — the answer is grounded in your ingested documents
+curl -X POST http://localhost:8000/query/generate \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What does the fox jump over?"}'
+# → "The fox jumps over the lazy dog."
+
+# 3. (optional) Fetch a stored document by id
+curl http://localhost:8000/query/documents/3fa85f64-5717-4562-b3fc-2c963f66afa6
 ```
 
 ---
 
 ## Project layout
 
-<!-- FLAG: src layout confirmed from our work, but the exact module names below
-     are reconstructed — correct them against your actual tree. -->
-
 ```
-src/
-  <rag_app>/
-    db/           # base + engine + scripts for setting up the db
-    stores/       # DocStore, ChunkStore, VectorStore (persistence only)
-    services/     # IngestionService, RetrievalService, QueryService
-    models/       # models for the ORM mapping
-    llm/          # factory + llm_client 
-    embeddings/   # sentence-transformers wrapper
-    api/          # FastAPI routes + Pydantic schemas + dependencies
+src/rag_app/
+  api/          # FastAPI app, routes, dependencies
+  services/     # IngestionService, RetrievalService, AnswerService
+  stores/       # DocStore, ChunkStore, VectorStore (persistence only)
+  models/       # SQLAlchemy ORM models
+  chunkings/    # chunker + factory
+  embeddings/   # sentence-transformers wrapper
+  llm/          # LLM client + factory + prompter
+  db/           # engine, base, startup bootstrap
 tests/
-README.md 
-DECISIONS.md
-pyproject.toml
 ```
 
 ---

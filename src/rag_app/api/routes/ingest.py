@@ -3,7 +3,7 @@ from fastapi import Depends
 
 from pydantic import BaseModel
 from typing import Annotated
-from uuid import uuid4
+from uuid import uuid4, UUID
 from hashlib import sha256
 
 from rag_app.api.deps import get_ingestor
@@ -27,13 +27,15 @@ router = APIRouter(prefix="/ingest")
 async def store_document(
     document: DocumentRequest,
     ingestor: Annotated[IngestionService, Depends(get_ingestor)],
-):
+) -> UUID:
+    doc_id = uuid4()
     await ingestor.store_document(
         DocumentDTO(
-            id=uuid4(),
+            id=doc_id,
             filename=document.filename,
             content_hash=sha256(document.content.encode()).hexdigest(),
             content=document.content,
             doc_metadata=document.metadata,
         )
     )
+    return doc_id

@@ -21,3 +21,13 @@ async def init_db() -> None:
     finally:
         await engine.dispose()
 
+async def drop_db() -> None:
+    """No Alembic yet need to drop and recrete the databse when the 
+    tables change.
+    """
+    engine = make_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+    finally:
+        await engine.dispose()
