@@ -21,14 +21,14 @@ class RetrievalService:
         self._session_factory = session_factory
 
     #later need to add threshold
-    async def search_topk_chunks(self, query: str, k: int) -> list[str]:
+    async def search_topk_chunks(self, query: str, k: int, threshold: float) -> list[str]:
         # add_special_tokens=False matches max_size (the content-token window the chunker uses).
         q_size = len(self.chunker.tokenizer(query, add_special_tokens=False)["input_ids"])
         if q_size > self.chunker.max_size:
             raise ValueError(f"Your query is too long {q_size}, max size for query is {self.chunker.max_size}")
         q_vector: list[float] = self.embedder.embed_query(query)[0]
+        k_vectors = await self.vec_store.search(q_vector, k, threshold)
         async with self._session_factory.begin() as session:
-            k_vectors = await self.vec_store.search(session, q_vector, k)
             k_chunks = await self.chunk_store.get_chunks_by_ids(session, [ch_id for ch_id, _ in k_vectors])
         # have to sort chunks by the vectors -> O(n)
         by_id = {ch.id: ch for ch in k_chunks}

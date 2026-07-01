@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # Optional full override; if set, takes precedence over the DB_* parts above.
     database_url: str | None = None
 
+    # ChromaDB settings
+    chroma_host: str = "localhost"
+    chroma_port: int = 8000
+    # How long the app/tests wait for the Chroma server to accept connections
+    # before giving up. The distroless chroma image ships no curl/wget/python, so a
+    # compose healthcheck is impossible; readiness is enforced app-side (connect()).
+    chroma_connect_retries: int = 30
+    chroma_connect_delay: float = 1.0   # seconds between attempts
+
     embed_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embed_dim: int = 384
     embed_device: str = "cpu"
@@ -31,9 +40,10 @@ class Settings(BaseSettings):
     chunk_size: int | None = None
     chunk_overlap_ratio: float = 0.12
 
-    # Retrieval. Default number of top chunks fetched for a query when the caller doesn't specify.
+    # Retrieval. Default number of top chunks and threshold
+    # for cosine distance for a query when the caller doesn't specify.
     retrieval_top_k: int = 5
-
+    retrieval_threshold: float = 0.7
     # LLM (generation). Endpoint is base_url + model so the model can be swapped without rewriting a
     # full URL. llm_api_key is required only when actually calling the LLM (like db_password for the
     # DB), so modules that don't generate still import. llm_timeout: httpx defaults to 5s, far too

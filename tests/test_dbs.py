@@ -88,77 +88,79 @@ async def test_chunk_store_no_chunks_doc_id_exception(chunk_store, session, db_t
     with pytest.raises(ValueError):
         await chunk_store.get_chunks_by_document(session, uuid4())
 
-async def test_vec_store_one_vector_roundtrip(vector_store, doc_store, chunk_store, fake_embedder, session, new_session, db_tests):
+async def test_vec_store_one_vector_roundtrip(vec_store, doc_store, chunk_store, fake_embedder, session, db_tests):
     doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
     await chunk_store.add_chunks(session, chunks)
-    vector = fake_embedder.embed_document([chunks[0].content])[0]
-    await vector_store.add_vector(session, ch_ids[0], vector)
+    # commit doc+chunks first: the store writes vectors on its own connection and the FK
+    # (Vector.chunk_id -> chunks.id) needs them already visible there.
     await session.commit()
-    async with new_session() as s2:
-        ret_vector = await vector_store.get_vector_values_by_chunk_id(s2, chunks[0].id)
+    vector = fake_embedder.embed_document([chunks[0].content])[0]
+    await vec_store.add_vector(ch_ids[0], vector)
+    ret_vector = await vec_store.get_vector_values_by_chunk_id(chunks[0].id)
     assert vector == pytest.approx(ret_vector)
     
 
-async def test_vec_store_vectors_roundtrip(vector_store, doc_store, chunk_store, fake_embedder, session, new_session, db_tests):
+async def test_vec_store_vectors_roundtrip(vec_store, doc_store, chunk_store, fake_embedder, session, db_tests):
     doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
     await chunk_store.add_chunks(session, chunks)
-    vectors = fake_embedder.embed_document([ch.content for ch in chunks])
-    await vector_store.add_vectors(session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)])
-    ret_vectors = []
     await session.commit()
-    async with new_session() as s2:
-        for i, _ in enumerate(vectors):
-            ret_vectors.append(await vector_store.get_vector_values_by_chunk_id(s2, chunks[i].id))
-    
+    vectors = fake_embedder.embed_document([ch.content for ch in chunks])
+    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    ret_vectors = []
+    for i, _ in enumerate(vectors):
+        ret_vectors.append(await vec_store.get_vector_values_by_chunk_id(chunks[i].id))
+
     for i, vec in enumerate(ret_vectors):
         for j, embed in enumerate(vec):
             assert vectors[i][j] == pytest.approx(embed)
 
 
-async def test_vec_store_wrong_dim(vector_store, doc_store, chunk_store, session, db_tests):
+async def test_vec_store_wrong_dim(vec_store, doc_store, chunk_store, session, db_tests):
     doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
     await chunk_store.add_chunks(session, chunks)
     with pytest.raises(ValueError):
-        await vector_store.add_vector(session, uuid4(), [0,1,2,3])
-    
-async def test_vec_store_get_values_by_chunk_id_eror(vector_store, doc_store, chunk_store, fake_embedder, session, db_tests):
-    doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
-    await doc_store.add_document(session, doc)
-    ch_ids = [uuid4() for i in range(6)]
-    chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
-    await chunk_store.add_chunks(session, chunks)
-    vectors = fake_embedder.embed_document([ch.content for ch in chunks])
-    await vector_store.add_vectors(session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)])
-    with pytest.raises(ValueError):
-        await vector_store.get_vector_values_by_chunk_id(session, uuid4())
+        await vec_store.add_vector(uuid4(), [0,1,2,3])
 
-async def test_vec_store_search(vector_store, doc_store, chunk_store, fake_embedder, session, new_session, db_tests, settings_session):
+async def test_vec_store_get_values_by_chunk_id_eror(vec_store, doc_store, chunk_store, fake_embedder, session, db_tests):
     doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
     await chunk_store.add_chunks(session, chunks)
+    await session.commit()
+    vectors = fake_embedder.embed_document([ch.content for ch in chunks])
+    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    with pytest.raises(ValueError):
+        await vec_store.get_vector_values_by_chunk_id(uuid4())
+
+async def test_vec_store_search(vec_store, doc_store, chunk_store, fake_embedder, session, db_tests, settings_session):
+    doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
+    await doc_store.add_document(session, doc)
+    ch_ids = [uuid4() for i in range(6)]
+    chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
+    await chunk_store.add_chunks(session, chunks)
+    await session.commit()
     vectors = []
     for i in range(5):
         embed = [0 for i in range(settings_session.embed_dim)]
         embed[i] = 1
         vectors.append(embed)
 
-    await vector_store.add_vectors(session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)])
-    await session.commit()
+    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
     query = [0 for i in range(settings_session.embed_dim)]
     query[0] = 1
-    async with new_session() as s2:
-        found_k = await vector_store.search(s2, query, 5)
+    # threshold=2.0 (cosine-distance max) so nothing is filtered out — these assertions are about
+    # ordering/ties, not threshold filtering.
+    found_k = await vec_store.search(query, 5, 2.0)
     # Only the nearest (query == ch_ids[0]) is unambiguously ordered; ch_ids[1..4] all tie at
     # cosine_distance 1.0 (orthogonal basis vectors) and search has no secondary sort key, so
     # their relative order is not guaranteed. Assert the head exactly and the tied tail as a set.
@@ -167,30 +169,29 @@ async def test_vec_store_search(vector_store, doc_store, chunk_store, fake_embed
     assert all(dist == pytest.approx(1.0) for _, dist in found_k[1:])
 
 
-async def test_vec_store_search_bad_k(vector_store, session, db_tests, settings_session):
+async def test_vec_store_search_bad_k(vec_store, session, db_tests, settings_session):
     with pytest.raises(ValueError):
-        await vector_store.search(session, [0 for i in range(settings_session.embed_dim)], 0)  
+        await vec_store.search([0 for i in range(settings_session.embed_dim)], 0, 2.0)
 
 
-async def test_vec_store_search_k_bigger_than_db_records(vector_store, doc_store, chunk_store, fake_embedder, session, new_session, db_tests, settings_session):
+async def test_vec_store_search_k_bigger_than_db_records(vec_store, doc_store, chunk_store, fake_embedder, session, db_tests, settings_session):
     doc = DocumentDTO(uuid4(),"file1.txt", "0123456789abcdef", "some amazing content in the file", {"creator": "assasino", "size": 100})
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1), ChunkDTO(ch_ids[2], "ghi", doc.id, 2), ChunkDTO(ch_ids[3], "jkl", doc.id, 3), ChunkDTO(ch_ids[4], "mno", doc.id, 4), ChunkDTO(ch_ids[5], "prs", doc.id, 5)]
     await chunk_store.add_chunks(session, chunks)
+    await session.commit()
     vectors = []
     for i in range(5):
         embed = [0 for i in range(settings_session.embed_dim)]
         embed[i] = 1
         vectors.append(embed)
-    await vector_store.add_vectors(session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)])
-    await session.commit()
+    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
     query = [0 for i in range(settings_session.embed_dim)]
     query[0] = 1
-    async with new_session() as s2:
-        found_k = await vector_store.search(s2, query, 10)
+    found_k = await vec_store.search(query, 10, 2.0)
 
-    # Only 5 vectors exist, so k=10 returns 5. Same tie caveat as test_vec_store_search: the head
+    # Only 5 vectors exist, so k=10 returns 5. Same tie caveat as test_pgvec_store_search: the head
     # is deterministic, the four distance-1.0 results are not ordered among themselves.
     assert len(found_k) == 5
     assert found_k[0] == (ch_ids[0], pytest.approx(0.0))
@@ -202,7 +203,7 @@ async def test_vec_store_search_k_bigger_than_db_records(vector_store, doc_store
 
 
 async def test_doc_store_remove_cascades_to_chunks_and_vectors(
-    doc_store, chunk_store, vector_store, fake_embedder, session, new_session, db_tests
+    doc_store, chunk_store, pg_vector_store, fake_embedder, session, new_session, db_tests
 ):
     # FK ON DELETE CASCADE (+ passive_deletes) means deleting the document removes its chunks, and
     # in turn their vectors, at the DB level.
@@ -211,9 +212,9 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     ch_ids = [uuid4() for _ in range(2)]
     chunks = [ChunkDTO(ch_ids[0], "abc", doc.id, 0), ChunkDTO(ch_ids[1], "def", doc.id, 1)]
     await chunk_store.add_chunks(session, chunks)
-    vec = fake_embedder.embed_document([chunks[0].content])[0]
-    await vector_store.add_vector(session, ch_ids[0], vec)
     await session.commit()
+    vec = fake_embedder.embed_document([chunks[0].content])[0]
+    await pg_vector_store.add_vector(ch_ids[0], vec)
 
     await doc_store.remove_document(session, doc.id)
     await session.commit()
@@ -221,5 +222,5 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     async with new_session() as s2:
         with pytest.raises(ValueError):
             await chunk_store.get_chunks_by_document(s2, doc.id)
-        with pytest.raises(ValueError):
-            await vector_store.get_vector_values_by_chunk_id(s2, ch_ids[0])
+    with pytest.raises(ValueError):
+        await pg_vector_store.get_vector_values_by_chunk_id(ch_ids[0])

@@ -1,6 +1,7 @@
 services:
-  db:
+  pg:
     image: pgvector/pgvector:pg16
+    profiles: ["app", "test"]
     environment:
       POSTGRES_USER: raguser
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
@@ -15,17 +16,40 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build: .
-    depends_on:
-      db:
-        condition: service_healthy   # api won't start until pg_isready passes
-    environment:
-      # host is `db` (the compose service name), not localhost.
-      DATABASE_URL: postgresql+asyncpg://raguser:${POSTGRES_PASSWORD:-ragpass}@db:5432/ragdb
-      LLM_API_KEY: ${LLM_API_KEY:-}
+  # Vector store. Tag pinned to match the installed chromadb client (1.5.9).
+  # In both profiles: the `app` stack needs a vector store (api depends_on it), and the
+  # `test` stack needs it for host-run pytest. Publishes host port 8000 for pytest, which
+  # reaches it at CHROMA_HOST:CHROMA_PORT (default localhost:8000). `api` publishes host
+  # 8080 (not 8000) to avoid colliding with this; inside the network api reaches Chroma at
+  # chroma:8000.
+  #
+  # No healthcheck: the chromadb/chroma image is distroless (no curl/wget/python), so a
+  # container healthcheck is impossible. Readiness is enforced app-side by connect()
+  # (chroma_vector_store.py), which the FastAPI lifespan and the test fixture both call.
+  # Any consumer using `depends_on: chroma` must rely on the default `service_started` —
+  # NOT `condition: service_healthy`, which would hang forever with no healthcheck.
+  chroma:
+    image: chromadb/chroma:1.5.9
+    profiles: ["app", "test"]
     ports:
       - "8000:8000"
+
+  api:
+    build: .
+    profiles: ["app"]
+    depends_on:
+      pg:
+        condition: service_healthy   # api won't start until pg_isready passes
+      chroma:
+        condition: service_started
+    environment:
+      # host is `pg` (the compose service name), not localhost.
+      DATABASE_URL: postgresql+asyncpg://raguser:${POSTGRES_PASSWORD:-ragpass}@pg:5432/ragdb
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    ports:
+      - "8080:8000"
 
 volumes:
   pgdata:

@@ -19,12 +19,12 @@ _EXPECTED_CHUNKS = 3
 
 
 def _make_ingestor(
-    engine, doc_store, chunk_store, vector_store, fake_embedder, fake_tokenizer
+    engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
 ):
     chunker = Chunker(fake_tokenizer, 20, 5)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return IngestionService(
-        doc_store, chunk_store, vector_store, fake_embedder, chunker, session_factory
+        doc_store, chunk_store, pg_vector_store, fake_embedder, chunker, session_factory
     )
 
 
@@ -32,7 +32,7 @@ async def test_store_document_persists_doc_chunks_vectors(
     engine,
     doc_store,
     chunk_store,
-    vector_store,
+    pg_vector_store,
     fake_embedder,
     fake_tokenizer,
     new_session,
@@ -40,7 +40,7 @@ async def test_store_document_persists_doc_chunks_vectors(
 ):
     doc = DocumentDTO(uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, {"creator": "ambulance"})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vector_store, fake_embedder, fake_tokenizer
+        engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
     )
 
     await ingestor.store_document(doc)
@@ -49,7 +49,7 @@ async def test_store_document_persists_doc_chunks_vectors(
         ret_doc = await doc_store.get_document(s, doc.id)
         chunks = await chunk_store.get_chunks_by_document(s, doc.id)
         vectors = [
-            await vector_store.get_vector_values_by_chunk_id(s, ch.id) for ch in chunks
+            await pg_vector_store.get_vector_values_by_chunk_id(ch.id) for ch in chunks
         ]
 
     assert ret_doc.id == doc.id
@@ -65,7 +65,7 @@ async def test_store_document_dedupes_on_content_hash(
     engine,
     doc_store,
     chunk_store,
-    vector_store,
+    pg_vector_store,
     fake_embedder,
     fake_tokenizer,
     new_session,
@@ -76,7 +76,7 @@ async def test_store_document_dedupes_on_content_hash(
     doc1 = DocumentDTO(uuid4(), "first.txt", "same-hash", _FORTY_WORDS, {})
     doc2 = DocumentDTO(uuid4(), "second.txt", "same-hash", _FORTY_WORDS, {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vector_store, fake_embedder, fake_tokenizer
+        engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
     )
 
     await ingestor.store_document(doc1)
@@ -97,14 +97,14 @@ async def test_store_document_rejects_whitespace_only(
     engine,
     doc_store,
     chunk_store,
-    vector_store,
+    pg_vector_store,
     fake_embedder,
     fake_tokenizer,
     db_tests,
 ):
     doc = DocumentDTO(uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vector_store, fake_embedder, fake_tokenizer
+        engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
     )
 
     with pytest.raises(ValueError):

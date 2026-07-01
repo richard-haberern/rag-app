@@ -29,7 +29,7 @@ async def test_correct_answer(make_llm_client):
     resp = await llm.generate("What is the main idea behind C++?")
     assert resp == "Generated correct output for the given input"
 
-async def test_e2e(make_llm_client, vector_store, doc_store, chunk_store, engine, session, new_session, db_tests, settings, tmp_path):
+async def test_e2e(make_llm_client, pg_vector_store, doc_store, chunk_store, engine, session, new_session, db_tests, settings, tmp_path):
     f = tmp_path / "doc.txt"
     f.write_text("Some real content with words in it")
     embedder = Embedder()
@@ -37,8 +37,8 @@ async def test_e2e(make_llm_client, vector_store, doc_store, chunk_store, engine
     body = gemini_response("Good job everything works smoothly.")
     llm = make_llm_client(make_handler(body))
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    ingestor = IngestionService(doc_store, chunk_store, vector_store, embedder, chunker, session_factory)
-    retriever = RetrievalService(chunk_store, vector_store, doc_store, embedder, chunker, session_factory)
+    ingestor = IngestionService(doc_store, chunk_store, pg_vector_store, embedder, chunker, session_factory)
+    retriever = RetrievalService(chunk_store, pg_vector_store, doc_store, embedder, chunker, session_factory)
     answerer = AnswerService(llm, retriever)
     doc = DocumentDTO(uuid4(),"doc.txt", str(f), "0123456789abcdef", {"creator": "assasino", "size": 100})
     
@@ -48,10 +48,13 @@ async def test_e2e(make_llm_client, vector_store, doc_store, chunk_store, engine
 
     await doc_store.add_document(session, doc)
     await chunk_store.add_chunks(session, chunks)
-    await vector_store.add_vectors(session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    # commit doc+chunks first: the store writes vectors on its own connection and the FK needs them visible.
     await session.commit()
+    await pg_vector_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
 
-    found_k = await retriever.search_topk_chunks("What is the meaning of life?", 3) 
+    # threshold=2.0 (cosine-distance max) keeps the old no-threshold top-k behaviour these
+    # ordering assertions were written against.
+    found_k = await retriever.search_topk_chunks("What is the meaning of life?", 3, 2.0)
     assert found_k[0] == "Meaning of life is someting noone can answer excpet C++"
     assert found_k[1] == "Life is beautiful."
     assert found_k[2] == "Sun is shining"

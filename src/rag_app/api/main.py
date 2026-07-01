@@ -15,8 +15,7 @@ from rag_app.services.ingestor import IngestionService
 from rag_app.services.retriever import RetrievalService
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.stores.document_store import DocStore
-from rag_app.stores.vector_store import VectorStore
-
+from rag_app.stores.chroma_vector_store import ChromaVectorStore, connect, make_collection
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,7 +28,8 @@ async def lifespan(app: FastAPI):
     app.state.llm_client = build_llm_client(app.state.http)
     app.state.chunk_store = ChunkStore()
     app.state.doc_store = DocStore()
-    app.state.vec_store = VectorStore()
+    app.state.client = await connect()  # blocks until the Chroma server is ready
+    app.state.vec_store = ChromaVectorStore(await make_collection(app.state.client))
     app.state.ingestor = IngestionService(
         app.state.doc_store,
         app.state.chunk_store,
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 
     await app.state.engine.dispose()
     await app.state.http.aclose()
-
+    # client has no close / aclose method - AsyncClient shouldn't leak
 
 app = FastAPI(
     title="Richies RAG-app",

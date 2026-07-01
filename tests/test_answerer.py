@@ -18,7 +18,7 @@ _NO_CONTEXT_MSG = "There is not enough context to generate a good answer."
 
 
 async def test_get_answer_no_context_skips_llm(
-    engine, doc_store, chunk_store, vector_store, fake_embedder, fake_tokenizer, db_tests
+    engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer, db_tests
 ):
     def exploding_handler(req: httpx.Request) -> httpx.Response:
         raise AssertionError("LLM must not be called when retrieval is empty")
@@ -28,7 +28,7 @@ async def test_get_answer_no_context_skips_llm(
 
     chunker = Chunker(fake_tokenizer, 20, 5)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    retriever = RetrievalService(chunk_store, vector_store, doc_store, fake_embedder, chunker, session_factory)
+    retriever = RetrievalService(chunk_store, pg_vector_store, doc_store, fake_embedder, chunker, session_factory)
     answerer = AnswerService(llm, retriever)
 
     try:

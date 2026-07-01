@@ -29,7 +29,6 @@ sentence-transformer
  - all-MiniLM-L6-v2 - fast on CPU, no GPU needed, relatively small, industry standard, not the strongest on embedding but for MVP enough, easy to swap later for better model based on MTEB
  - for similarity search we use cosine_distance - all-MiniLM-l6-v2 optimized for that
 
-Storing just the path to a raw documnet to give the user
 Later use cross-encoders for better retrieval - not in a v1
 
 Two method in embedding class
@@ -109,7 +108,7 @@ Store Orchestrator - Ingestion Service
 
 
 Retrieval Service
- - deffered: threshold to searchk - filter, re-rank with cross-encoder
+ - deffered: re-rank with cross-encoder
 
 Prompt Builder
  - no citations for v1
@@ -124,7 +123,7 @@ LLM Client
  - not owned by LLMClient, owned by caller
 
 FastAPI
- - documents accpted as JSONs - no document parsing 
+ - documents accepted as str content in JSONs - no document parsing 
  - used routes for clean architecture 
 
 FastAPI deferred
@@ -158,3 +157,18 @@ Ingest takes content from the request body (path→content redesign)
    from chunks: joining chunks duplicates the overlap region and drops boundary whitespace, so
    it isn't faithful. Accepts storing content twice (row + chunks) for an exact, simple read.
  - dropped the `aiofiles` dependency: nothing reads files anymore.
+
+
+
+Chroma test suite
+ - independent collections for each test - teardown after use
+ - actual docker db - no AsyncClient in memory only synchronous which is unusable for this project
+
+ - default 8000 is already used for the api - fixed for the api is used 8080:8000 this means the
+   test suite chroma on port 8000 is unchanged
+ - Chroma image has no curl/wget/python so we can't have a docker compose file healthcheck,
+   because of that we added the healthcheck to be app side - both to the app and the tests.
+ - the `AsyncHttpClient`.make_client() does the db connection check - not lazily (tested)
+   that's why we retry the creation of client not just connect 
+
+Chroma is first class dependency without connection to Chroma DB it app won't start
