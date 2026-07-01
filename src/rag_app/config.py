@@ -10,12 +10,12 @@ class Settings(BaseSettings):
     # container. Kept optional so models (which only need embed_dim) import without it.
     # If we need just the embed_dim etc. and don't want to do anything with the database
     # no need for password
-    db_user: str = "postgres"
+    db_user: str | None = None
     db_password: str | None = None
     db_password_test: str | None = None
     db_host: str = "localhost"
     db_port: int = 5432
-    db_name: str = "ragdb"
+    db_name: str | None = None
     db_name_test: str | None = None
     # Optional full override; if set, takes precedence over the DB_* parts above.
     database_url: str | None = None

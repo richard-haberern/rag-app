@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import AsyncClient
 
-from rag_app.api.routes import ingest, query
+from rag_app.api.routes import ingest, query, dev
 from rag_app.chunkings.factory import build_chunker
 from rag_app.db.bootstrap import init_db
 from rag_app.db.engine import make_engine, make_sessionmaker
@@ -61,7 +61,7 @@ app = FastAPI(
 )
 app.include_router(ingest.router)
 app.include_router(query.router)
-
+app.include_router(dev.router)
 
 # Service/store layers signal failures with plain exceptions; translate them to HTTP here so
 # they don't surface as opaque 500s. ValueError = bad input (over-long query, invalid/empty

@@ -4,11 +4,13 @@ services:
     profiles: ["app", "test"]
     environment:
       POSTGRES_USER: raguser
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ragdb
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"   # host-run pytest (profile test) reaches rag_test at localhost:5432
     healthcheck:
       # Same user/db as POSTGRES_* and the api's DATABASE_URL below.
       test: ["CMD-SHELL", "pg_isready -U raguser -d ragdb"]

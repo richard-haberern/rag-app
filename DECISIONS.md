@@ -172,3 +172,12 @@ Chroma test suite
    that's why we retry the creation of client not just connect 
 
 Chroma is first class dependency without connection to Chroma DB it app won't start
+
+- tests run against the compose pg (profile test) in an
+  isolated rag_test db as raguser; pg now publishes host 5432; test-DB creds
+  couple DB_PASSWORD_TEST to POSTGRES_PASSWORD (same role). Plus the earlier
+
+- api runs on port 8080
+- we use protocol for the vector seam instead of the ABC inheritance hierarchy
+- added threshold to search
+
