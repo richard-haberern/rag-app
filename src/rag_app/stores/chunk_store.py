@@ -18,9 +18,17 @@ def _to_dto(chunk: Chunk) -> ChunkDTO:
 
 
 class ChunkStore:
-    async def add_chunks(self, session: AsyncSession, chunks: Sequence[ChunkDTO]) -> None:
+    async def add_chunks(
+        self, session: AsyncSession, chunks: Sequence[ChunkDTO]
+    ) -> None:
         session.add_all(
-            [ Chunk(id=c.id, content=c.content, document_id=c.document_id, position=c.position,)
+            [
+                Chunk(
+                    id=c.id,
+                    content=c.content,
+                    document_id=c.document_id,
+                    position=c.position,
+                )
                 for c in chunks
             ]
         )
@@ -31,13 +39,19 @@ class ChunkStore:
             raise ValueError(f"Chunk {id} doesn't exist")
         return _to_dto(chunk)
 
-    async def get_chunks_by_ids(self, session: AsyncSession, ids: Sequence[UUID]) -> list[ChunkDTO]:
+    async def get_chunks_by_ids(
+        self, session: AsyncSession, ids: Sequence[UUID]
+    ) -> list[ChunkDTO]:
         # Text-fetch half of two-step retrieval. Order is not guaranteed here; the caller
         # holds the (chunk_id, distance) ranking from VectorStore.search.
-        result = await session.execute(select(Chunk).where(Chunk.id.in_(ids)).order_by(Chunk.position))
+        result = await session.execute(
+            select(Chunk).where(Chunk.id.in_(ids)).order_by(Chunk.position)
+        )
         return [_to_dto(c) for c in result.scalars()]
 
-    async def get_chunks_by_document(self, session: AsyncSession, document_id: UUID) -> list[ChunkDTO]:
+    async def get_chunks_by_document(
+        self, session: AsyncSession, document_id: UUID
+    ) -> list[ChunkDTO]:
         result = await session.execute(
             select(Chunk)
             .where(Chunk.document_id == document_id)

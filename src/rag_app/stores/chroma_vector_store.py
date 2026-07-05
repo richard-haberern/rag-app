@@ -8,17 +8,27 @@ from rag_app.schemas import Embedding
 from rag_app.stores.vector_store import _check_dim
 from rag_app.config import get_settings
 
-from chromadb.api.models.AsyncCollection import AsyncCollection 
+from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.async_api import AsyncClientAPI
 from chromadb import AsyncHttpClient
+
 
 async def make_client() -> AsyncClientAPI:
     host = get_settings().chroma_host
     port = get_settings().chroma_port
-    return await AsyncHttpClient(host=host, port=port, )
+    return await AsyncHttpClient(
+        host=host,
+        port=port,
+    )
+
 
 async def make_collection(client: AsyncClientAPI) -> AsyncCollection:
-    return await client.get_or_create_collection(name="VectorDB", embedding_function=None, configuration={"hnsw" : {"space" : "cosine"}})
+    return await client.get_or_create_collection(
+        name="VectorDB",
+        embedding_function=None,
+        configuration={"hnsw": {"space": "cosine"}},
+    )
+
 
 async def connect(
     retries: int | None = None,
@@ -47,6 +57,7 @@ async def connect(
         f"after {retries} attempts: {last_exc}"
     )
 
+
 class ChromaVectorStore:
     def __init__(self, collection: AsyncCollection) -> None:
         self.collection = collection
@@ -55,17 +66,17 @@ class ChromaVectorStore:
         _check_dim(vector)
         await self.collection.add(
             ids=[str(chunk_id)],
-            embeddings=[vector]
+            embeddings=[vector],  # type: ignore[arg-type]
         )
 
     async def add_vectors(self, items: Sequence[tuple[UUID, Embedding]]) -> None:
         for _, vector in items:
-              _check_dim(vector)
+            _check_dim(vector)
         await self.collection.add(
             ids=[str(id) for id, _ in items],
-            embeddings=[vector for _, vector in items]
+            embeddings=[vector for _, vector in items],  # type: ignore[arg-type]
         )
-        
+
     async def get_vector_values_by_chunk_id(self, chunk_id: UUID) -> Embedding:
         results = await self.collection.get(
             ids=[str(chunk_id)],
@@ -77,13 +88,15 @@ class ChromaVectorStore:
             raise ValueError(f"Vector for chunk {chunk_id} doesn't exist")
         # always numpy float32 - just runtime check
         return cast(ndarray, embeddings[0]).tolist()
-    
-    async def search(self, query_vector: Embedding, k: int, threshold: float) -> list[tuple[UUID, float]]:
+
+    async def search(
+        self, query_vector: Embedding, k: int, threshold: float
+    ) -> list[tuple[UUID, float]]:
         _check_dim(query_vector)
         if k <= 0:
             raise ValueError("k has to be >= 1")
         result = await self.collection.query(
-            query_embeddings=[query_vector],
+            query_embeddings=[query_vector],  # type: ignore[arg-type]
             n_results=k,
         )
         if result["distances"] is None or result["ids"] is None:

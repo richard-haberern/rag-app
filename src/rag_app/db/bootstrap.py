@@ -21,8 +21,9 @@ async def init_db() -> None:
     finally:
         await engine.dispose()
 
+
 async def drop_db() -> None:
-    """No Alembic yet need to drop and recrete the databse when the 
+    """No Alembic yet need to drop and recrete the databse when the
     tables change.
     """
     engine = make_engine()

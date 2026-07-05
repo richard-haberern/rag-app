@@ -38,7 +38,9 @@ async def test_store_document_persists_doc_chunks_vectors(
     new_session,
     db_tests,
 ):
-    doc = DocumentDTO(uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, {"creator": "ambulance"})
+    doc = DocumentDTO(
+        uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, {"creator": "ambulance"}
+    )
     ingestor = _make_ingestor(
         engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
     )
@@ -109,4 +111,3 @@ async def test_store_document_rejects_whitespace_only(
 
     with pytest.raises(ValueError):
         await ingestor.store_document(doc)
-

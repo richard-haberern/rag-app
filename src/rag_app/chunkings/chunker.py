@@ -7,7 +7,9 @@ if TYPE_CHECKING:
 
 
 class Chunker:
-    def __init__(self, tokenizer: "PreTrainedTokenizerBase", max_size: int, overlap: int) -> None:
+    def __init__(
+        self, tokenizer: "PreTrainedTokenizerBase", max_size: int, overlap: int
+    ) -> None:
         # return_offsets_mapping is only available on fast (Rust-backed) tokenizers; a slow one
         # would fail deep inside chunk_text, so reject it up front. The model-window ceiling on
         # max_size is enforced in build_chunker (where the model is known), not here.
@@ -22,8 +24,11 @@ class Chunker:
         self.tokenizer = tokenizer
         self.max_size = max_size
         self.overlap = overlap
+
     def chunk_text(self, text: str) -> list[str]:
-        out = self.tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
+        out = self.tokenizer(
+            text, return_offsets_mapping=True, add_special_tokens=False
+        )
         offsets = out["offset_mapping"]
         # guarded also at ingestor with checking for empty doc, but chunker itself has to be safe
         if not offsets:
@@ -36,12 +41,9 @@ class Chunker:
                 char_start = offsets[tok_start][0]
                 ret.append(text[char_start:])
                 return ret
-            
+
             tok_end = tok_start + self.max_size
             char_start = offsets[tok_start][0]
-            char_end = offsets[tok_end-1][1]
+            char_end = offsets[tok_end - 1][1]
             ret.append(text[char_start:char_end])
             tok_start = tok_end - self.overlap
-            
-
-

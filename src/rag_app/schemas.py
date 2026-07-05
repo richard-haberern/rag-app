@@ -13,7 +13,7 @@ class DocumentDTO:
     content_hash: str
     content: str
     # without this all instances without metadata would share the same empty {}
-    doc_metadata: dict[str, Any] = field(default_factory=dict) 
+    doc_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

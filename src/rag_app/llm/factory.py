@@ -4,7 +4,9 @@ from rag_app.llm.llm_client import LLMClient
 from httpx import AsyncClient
 
 
-def build_llm_client(client: AsyncClient, settings: Settings | None = None) -> LLMClient:
+def build_llm_client(
+    client: AsyncClient, settings: Settings | None = None
+) -> LLMClient:
     """Construct an LLMClient from Settings, configuring the injected AsyncClient.
 
     Single place that reads LLM config and enforces the api key is present. The client is injected

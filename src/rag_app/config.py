@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # before giving up. The distroless chroma image ships no curl/wget/python, so a
     # compose healthcheck is impossible; readiness is enforced app-side (connect()).
     chroma_connect_retries: int = 30
-    chroma_connect_delay: float = 1.0   # seconds between attempts
+    chroma_connect_delay: float = 1.0  # seconds between attempts
 
     embed_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embed_dim: int = 384
@@ -63,19 +63,23 @@ class Settings(BaseSettings):
             f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
+
     @property
     def sqlalchemy_url_test(self) -> str:
         # Deliberately ignores database_url: the test URL must be built from the
         # explicit DB_*_TEST parts so the suite's TRUNCATE/DROP can never alias prod
         # via a stray DATABASE_URL. (Flag for DECISIONS.md.)
         if self.db_password_test is None:
-            raise ValueError("DB_PASSWORD_TEST is required to build the test database URL")
+            raise ValueError(
+                "DB_PASSWORD_TEST is required to build the test database URL"
+            )
         if self.db_name_test is None:
             raise ValueError("DB_NAME_TEST is required to build the test database URL")
         return (
             f"postgresql+asyncpg://{self.db_user}:{self.db_password_test}"
             f"@{self.db_host}:{self.db_port}/{self.db_name_test}"
         )
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,5 +1,5 @@
 """Embedder plumbing: the dimension guard and the max_content_tokens budget.
-   No model loaded"""
+No model loaded"""
 
 import pytest
 
@@ -20,9 +20,11 @@ class _FakeST:
     def get_embedding_dimension(self) -> int:
         return self._dim
 
+
 def _patch_st(monkeypatch, dim: int, max_seq_length: int | None = 128) -> None:
     def factory(name, device=None):
         return _FakeST(dim, max_seq_length)
+
     # rebinds the embedder __init__ to factory
     monkeypatch.setattr("rag_app.embeddings.embedder.SentenceTransformer", factory)
 

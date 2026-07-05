@@ -1,7 +1,7 @@
 """Test doubles for the three external seams: tokenizer, embedder, LLM API.
 
 All deterministic, no network, no model load. These are generic stand-ins for
-`transformers` / `sentence-transformers` / the Gemini HTTP API """
+`transformers` / `sentence-transformers` / the Gemini HTTP API"""
 
 import hashlib
 import re
@@ -30,7 +30,12 @@ class FakeTokenizer:
     # Chunker rejects slow tokenizers up front (return_offsets_mapping needs a fast one).
     is_fast = True
 
-    def __call__(self, text: str, return_offsets_mapping: bool = False, add_special_tokens: bool = False) -> dict[str, list]:
+    def __call__(
+        self,
+        text: str,
+        return_offsets_mapping: bool = False,
+        add_special_tokens: bool = False,
+    ) -> dict[str, list]:
         spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
         out: dict[str, list] = {"input_ids": list(range(len(spans)))}
         if return_offsets_mapping:
@@ -52,7 +57,9 @@ class FakeEmbedder:
     (preserves ingest/query symmetry) and distinct texts -> distinct vectors.
     """
 
-    def __init__(self, tokenizer: FakeTokenizer, dim: int = 8, max_content_tokens: int = 512) -> None:
+    def __init__(
+        self, tokenizer: FakeTokenizer, dim: int = 8, max_content_tokens: int = 512
+    ) -> None:
         self._tokenizer = tokenizer
         self._dim = dim
         self._max_content_tokens = max_content_tokens
@@ -85,6 +92,7 @@ class FakeEmbedder:
 # Helpers produce Gemini-shaped JSON; a MockTransport handler returns them so the
 # *real* LLMClient.generate / _extract_text run against canned responses. The
 # AsyncClient lifecycle is owned by the `make_llm_client` conftest fixture.
+
 
 def gemini_response(text: str) -> dict:
     """Success-shaped generateContent body carrying `text`."""

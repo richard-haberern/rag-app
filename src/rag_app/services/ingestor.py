@@ -48,10 +48,7 @@ class IngestionService:
         async with self._session_factory.begin() as session:
             await self.doc_store.add_document(session, document)
             await self.chunk_store.add_chunks(session, chunk_dtos)
-        
+
         await self.vec_store.add_vectors(
-            [
-                (ch.id, vector)
-                for ch, vector in zip(chunk_dtos, vectors, strict=True)
-            ],
+            [(ch.id, vector) for ch, vector in zip(chunk_dtos, vectors, strict=True)],
         )

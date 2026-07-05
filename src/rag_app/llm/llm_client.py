@@ -9,6 +9,7 @@ class LLMClient:
     Auth (x-goog-api-key) and timeout live on the client (wired by build_llm_client); whoever
     created the client owns its lifecycle and closes it.
     """
+
     def __init__(self, model: str, base_url: str, client: httpx.AsyncClient) -> None:
         self._url = f"{base_url}/{model}:generateContent"
         self._client = client
@@ -28,4 +29,3 @@ class LLMClient:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"LLM returned no usable answer: {data!r}") from exc
-    

@@ -11,8 +11,7 @@ from rag_app.stores.chroma_vector_store import ChromaVectorStore, connect
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.config import Settings
 from tests.fakes import FakeTokenizer, FakeEmbedder, make_mock_llm_client
-from contextlib  import asynccontextmanager
-
+from contextlib import asynccontextmanager
 
 
 @pytest.fixture(scope="session")
@@ -21,17 +20,20 @@ async def engine(settings_session):
     yield engine
     await engine.dispose()
 
+
 @pytest.fixture
 def session_maker(engine):
     # Same factory the app uses (expire_on_commit=False); the concrete stores own
     # their own sessions/transactions through it.
     return make_sessionmaker(engine)
 
+
 @pytest.fixture
 async def session(engine):
     session = AsyncSession(engine, expire_on_commit=False)
     yield session
     await session.close()
+
 
 @pytest.fixture
 async def truncate(session: AsyncSession):
@@ -40,13 +42,16 @@ async def truncate(session: AsyncSession):
     await session.commit()
     yield
 
+
 @pytest.fixture
 def doc_store():
     return DocStore()
-    
+
+
 @pytest.fixture
 def chunk_store():
     return ChunkStore()
+
 
 @pytest.fixture(params=["pg", "chroma"])
 def vec_store(request, session_maker, chroma_collection):
@@ -55,9 +60,11 @@ def vec_store(request, session_maker, chroma_collection):
     elif request.param == "chroma":
         return ChromaVectorStore(chroma_collection)
 
+
 @pytest.fixture
 def pg_vector_store(session_maker):
     return PgVectorStore(session_maker)
+
 
 @pytest.fixture
 def chroma_vector_store(chroma_collection):
@@ -74,8 +81,10 @@ async def chroma_client(settings_session):
     try:
         client = await connect()
     except Exception as exc:
-        pytest.skip(f"Chroma server unreachable at "
-                    f"{settings_session.chroma_host}:{settings_session.chroma_port}: {exc}")
+        pytest.skip(
+            f"Chroma server unreachable at "
+            f"{settings_session.chroma_host}:{settings_session.chroma_port}: {exc}"
+        )
     return client
 
 
@@ -93,14 +102,12 @@ async def chroma_collection(chroma_client):
     await chroma_client.delete_collection(name=name)
 
 
-
-
 @pytest.fixture(scope="session")
 async def setup_schema(engine):
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
-    yield 
+    yield
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
@@ -127,7 +134,9 @@ def fake_tokenizer():
 
 @pytest.fixture
 def fake_embedder(fake_tokenizer, settings_session):
-    return FakeEmbedder(fake_tokenizer, settings_session.embed_dim, settings_session.chunk_size)
+    return FakeEmbedder(
+        fake_tokenizer, settings_session.embed_dim, settings_session.chunk_size
+    )
 
 
 # Yields a factory: call _make(handler) with an httpx MockTransport handler to get a
@@ -146,14 +155,17 @@ async def make_llm_client():
     for client in clients:
         await client.aclose()
 
+
 @pytest.fixture
 def db_tests(setup_schema, truncate):
     pass
-    
+
+
 @pytest.fixture
 async def new_session(engine):
     @asynccontextmanager
     async def _make():
         async with AsyncSession(engine, expire_on_commit=False) as s:
             yield s
+
     return _make

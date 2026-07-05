@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -15,10 +16,15 @@ from rag_app.services.ingestor import IngestionService
 from rag_app.services.retriever import RetrievalService
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.stores.document_store import DocStore
-from rag_app.stores.chroma_vector_store import ChromaVectorStore, connect, make_collection
+from rag_app.stores.chroma_vector_store import (
+    ChromaVectorStore,
+    connect,
+    make_collection,
+)
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()  # CREATE EXTENSION + create_all; idempotent, safe per boot
     app.state.engine = make_engine()
     app.state.session_maker = make_sessionmaker(app.state.engine)
@@ -54,6 +60,7 @@ async def lifespan(app: FastAPI):
     await app.state.http.aclose()
     # client has no close / aclose method - AsyncClient shouldn't leak
 
+
 app = FastAPI(
     title="Richies RAG-app",
     description="This is v1 of my first real project RAG-app",
@@ -62,6 +69,7 @@ app = FastAPI(
 app.include_router(ingest.router)
 app.include_router(query.router)
 app.include_router(dev.router)
+
 
 # Service/store layers signal failures with plain exceptions; translate them to HTTP here so
 # they don't surface as opaque 500s. ValueError = bad input (over-long query, invalid/empty

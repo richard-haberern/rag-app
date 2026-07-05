@@ -9,7 +9,10 @@ class AnswerService:
     def __init__(self, llm_client: LLMClient, retriever: RetrievalService) -> None:
         self.llm_client = llm_client
         self.retriever = retriever
-    async def get_answer(self, query: str, k: int | None = None, threshold: float | None = None) -> str:
+
+    async def get_answer(
+        self, query: str, k: int | None = None, threshold: float | None = None
+    ) -> str:
         # here we have to give answer if the context window is empty
         if k is None:
             k = get_settings().retrieval_top_k

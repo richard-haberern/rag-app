@@ -13,20 +13,33 @@ from rag_app.services.retriever import RetrievalService
 
 router = APIRouter(prefix="/query")
 
+
 class DocumentResponse(BaseModel):
     filename: str
     content: str
     doc_id: UUID
     doc_metadata: dict
 
+
 class GenerateRequest(BaseModel):
     query: str
 
+
 @router.post("/generate")
-async def generate_answer(q: GenerateRequest, answerer: Annotated[AnswerService, Depends(get_answerer)]) -> str:
+async def generate_answer(
+    q: GenerateRequest, answerer: Annotated[AnswerService, Depends(get_answerer)]
+) -> str:
     return await answerer.get_answer(q.query)
 
+
 @router.get("/documents/{doc_id}")
-async def get_document(doc_id: UUID, retriever: Annotated[RetrievalService, Depends(get_retriever)]) -> DocumentResponse:
+async def get_document(
+    doc_id: UUID, retriever: Annotated[RetrievalService, Depends(get_retriever)]
+) -> DocumentResponse:
     doc = await retriever.get_document(doc_id)
-    return DocumentResponse(filename=doc.filename, content=doc.content, doc_id=doc.id, doc_metadata=doc.doc_metadata)
+    return DocumentResponse(
+        filename=doc.filename,
+        content=doc.content,
+        doc_id=doc.id,
+        doc_metadata=doc.doc_metadata,
+    )
