@@ -1,189 +1,222 @@
-Decided stack is - FastAPI, PostgreSQL with SQLAlchemy + asyncpg, pgvector for vector storing - creating an interface that can be later easily migrated to dedicated 
-vector DB (Chroma DB), local embeddings via sentence-transformers, an LLM API for generation
+# Architecture Decisions
 
-FastAPI 
- - for async workflow and AI oriented apps is a clear winner, already had a little bit of experience from the MINI-RAG project
- - native async 
-Why not Django? 
- - not ideal for this project 
- - oriented for server-rendered pages app, batteries don't apply here
-Why pgvector first instead of a Chroma DB? 
- - it simplifies the first MVP
- - create the infrastructure in a way it is easy to migrate to ChromaDB - valuable skill on its own
-Local embeddings
- - don't need real big power 
- - learns more than calling an API
+Living record of the architectural choices for this RAG app and *why* they were
+made. Scope is the **v1 MVP**: correct end-to-end, backend-first. Anything marked
+deferred is intentionally out of scope for v1 — see the final section.
 
-=========v1==============
+---
 
-Atomicity with pg for both of the databases is impossible if we want to migrate later. It is off the table,
-we accept orphan chunks but not vectors. That means first store chunks, then vectors. For now the "orphan" chunks
-is a documented-problem, which will be resolved in later versions. 
+## Stack
 
-Chunk_id is code generated and not SERIAL from DB. Exists before any I/O, doesn't force the ordering (first chunk, then vector).
-Vector Store holds only (chunk_id, vector) - Chroma-shaped
-Retrieval in two-steps: search -> ids -> fetch text
+**FastAPI (async).**
+- Native async; a clear fit for an I/O-bound JSON API and AI-oriented apps.
+- Prior experience from the MINI-RAG project.
 
-sentence-transformer 
- - best for v1 MVP, easy, local
- - all-MiniLM-L6-v2 - fast on CPU, no GPU needed, relatively small, industry standard, not the strongest on embedding but for MVP enough, easy to swap later for better model based on MTEB
- - for similarity search we use cosine_distance - all-MiniLM-l6-v2 optimized for that
+**Not Django.**
+- Oriented toward server-rendered page apps; its "batteries" don't apply to a
+  pure JSON API.
 
-Later use cross-encoders for better retrieval - not in a v1
+**PostgreSQL + SQLAlchemy (async) + asyncpg.**
 
-Two method in embedding class
- - many tranformers use different one for each one so for future replacement is better to use this interface
- - one embedd_document 
- - one embedd_query
+**pgvector first, ChromaDB migration.**
+- pgvector keeps the first MVP simple (vectors live in the same DB as chunks).
+- Building the infrastructure so it migrates cleanly to ChromaDB is a valuable
+  skill in its own right.
 
-Seperate chunk_store, doc_store, vector_store (swappable).
- - we need positon in chunk mapping -> better for LLM generation when we retrive topk elements
+**Local embeddings via sentence-transformers.**
+- The workload doesn't need heavy compute.
+- More is learned by running embeddings locally than by calling an API.
 
-No ORM objects leaving the session - problem with detached objects
- - we return DTOs
- - extra mapping ORM -> DTO 
+**LLM via API for generation.**
 
+---
 
-init_db()
- - will have privileges problems with the pgvector extension the moment it leaves container 
- - create_all - doesn't track schema changes - if add column etc. doesn't change the tables
- - for dev - drop and recreate
+## Data Model & Persistence
 
-doc_metadata in Document is a dict of `str` and `Any`, the key always has to be `str`
+**No cross-store atomicity; orphan chunks accepted, orphan vectors not.**
+- Atomicity across Postgres and the vector store is impossible with the migration to Chroma
+- Write order is **chunks first, then vectors**. This can leave orphan chunks
+  (chunk with no vector); that is a documented, accepted problem for v1 and will
+  be resolved later. Orphan *vectors* are prevented by the store orchestration.
 
-No vector index for fast top-k retrieval search, deferred
- - brute force for now - implement later
+**`chunk_id` is code-generated, not a DB `SERIAL`.**
+- The id exists before any I/O, so it does not force the write ordering
+  (chunk-then-vector).
 
-In pyproject.toml we have lower_bound >= for the packages -> if a future package changes something we won't work
-for future pin with lockfile
+**Two-step retrieval.**
+- The vector store holds only `(chunk_id, vector)` — Chroma-shaped.
+- Retrieval is `search → chunk_ids → fetch text`.
 
+**DTOs cross the boundary, never ORM objects.**
+- Returning ORM objects outside the session causes detached-object problems.
+- Stores accept/return DTOs (`DocumentDTO`, `ChunkDTO`) / primitives; the extra
+  ORM→DTO mapping is the accepted cost.
 
-Deffered:
-1. ANN index (HNSW/ivfflat) 
-  - search is brute-force (sequential scan + cosine_distance ORDER BY) 
-  - add an index when row counts and query latency justify the build/tuning cost.
-2. create_all → Alembic
-  - create_all only creates missing tables; it never ALTERs an existing one
-  - model change silently leaves the live table on the old schema. 
-  - Dev workaround = drop + recreate
-3. pgvector extension privileges
-  - CREATE EXTENSION needs a privileged role
-  - fine in local container
-  - deployment time concern - must be pre-enbaled / a priviliged role
-4. Cross-encoder reranking of top-k
-  - v1 - bi-encoder retrieval only for now
-5. Orphan chunks — accepted
-  - no reconciliation / cleanup job
-  - orphan vectors - prevented in store-orchestration (not yet implemented)
-6. Abstract VectorStore/Embedder Protocol for the ChromaDB swap 
-  - right now the seam is concrete classes with compatible shapes, not a formal interface. 
-  - the chunk_vectors→chunks FK is pgvector-only and won't port to Chroma
-7. The whole HTTP + generation layer — FastAPI ingest/query endpoints and the LLM API client. Plus created_at/audit columns. 
-   and the broader out-of-scope set for v1: auth, streaming, multiple collections.
+**Separate `chunk_store`, `doc_store`, `vector_store` (vector store swappable).**
+- Chunk mapping keeps a `position`, which improves LLM generation when the top-k
+  chunks are retrieved.
+- `Chunk`: `position` (int) + `UniqueConstraint(document_id, position)`.
 
+**Vector model PK renamed `id` → `chunk_id`.**
+- Matches the `(chunk_id, vector)` shape; one vector per chunk.
 
-=========v1 implementation (CC plumbing)==============
+**`stored_vectors` keeps an FK → `stored_chunks(chunk_id)` `ON DELETE CASCADE`.**
+- Buys referential integrity + cascade deletes (not the `search()` return shape).
+- NOTE: this FK is **pgvector-only** — it couples the store to Postgres and will
+  **not** carry over to a ChromaDB store.
 
-- Vector model PK renamed id -> chunk_id (matches "(chunk_id, vector)"); one vector per chunk.
-- stored_vectors keeps a FK -> stored_chunks(chunk_id) ON DELETE CASCADE. NOTE: this FK is
-  pgvector-only — it couples the store to Postgres and will NOT carry over to a ChromaDB store.
-  It buys referential integrity + cascade deletes, not the search() return shape.
-- Chunk: position (int) + UniqueConstraint(document_id, position).
-- Document: JSONB metadata column (ORM attribute doc_metadata; 'metadata' is reserved by SQLAlchemy's
-  declarative registry). Raw document still stored as a filesystem path.
-- pgvector column dimension from one config value EMBED_DIM=384 -> single source of truth.
-- Stores accept/return DTOs (DocumentDTO, ChunkDTO)/primitives, never ORM objects.
-- One shared async engine + async_sessionmaker(expire_on_commit=False); DB creds from .env (DATABASE_URL).
-- init_db(): CREATE EXTENSION vector + metadata.create_all. Alembic deferred.
+**`doc_metadata` is a JSONB column, dict `str → Any`; keys must be `str`.**
+- ORM attribute is `doc_metadata` because `metadata` is reserved by SQLAlchemy's
+  declarative registry.
 
-- Deferred: ANN index (ivfflat/hnsw), abstract VectorStore/Embedder Protocols, created_at, FastAPI endpoint.//
+**pgvector column dimension comes from one config value `EMBED_DIM=384`.**
+- Single source of truth for the vector dimension.
 
+**One shared async engine + `async_sessionmaker(expire_on_commit=False)`.**
+- DB credentials from `.env` (`DATABASE_URL`).
 
+**Services own the session makers and the transaction boundaries.**
+- Sessions are passed into the store methods: we gain write atomicity while
+  keeping the vector store seam swappable.
+- Cost: a little overhead on reads and extra plumbing (services must begin/end
+  sessions).
 
+**Document dedup by content hash.**
+- Two documents are duplicates if their content is identical; the hash is stored.
+- Non-character documents are rejected.
 
+**No self-heal — dedup is preferred over self-heal.**
+- If a document + chunks are stored but the vectors are not, we cannot re-store to
+  fill the vectors, because dedup rejects the second attempt.
 
-Store Orchestrator - Ingestion Service
- - when inserting a document the embedder blocks the whole event loop - we accept that in v1
- - deffered: asyncio.to_thread
+**Ingest takes content from the request body (path → content redesign).**
+- Documents are sent as `content` in the request body; the service no longer reads
+  the filesystem. A path, if present, is just optional metadata.
+- Original content is stored verbatim on the `Document` row (a `content` column),
+  not reconstructed from chunks: joining chunks duplicates the overlap region and
+  drops boundary whitespace, so it isn't faithful. We accept storing content twice
+  (row + chunks) for an exact, simple read.
 
+---
 
-Retrieval Service
- - deffered: re-rank with cross-encoder
+## Embedding
 
-Prompt Builder
- - no citations for v1
+**Model: `all-MiniLM-L6-v2` (dim 384).**
+- Best fit for the v1 MVP: local, easy, fast on CPU with no GPU.
+- Relatively small and an industry standard; not the strongest embedder, but
+  enough for the MVP and easy to swap later based on MTEB.
 
-LLM Client
- - for v1 we use Gemini's free tier Flash 2.5 for fast answers and free tier for development
- - the client is swappable
- - we prompt the LLM through httpx without taking another dependency on anthropic / openai... package
- - the free tier uses the queries for training - for v1 fine
- - we use AsyncClient for the session pools because we do the same https call over and over again 
- - AsyncClient is injected - expensive, more testable, follows the projects architecture
- - not owned by LLMClient, owned by caller
+**Cosine distance for similarity search.**
+- `all-MiniLM-L6-v2` is optimized for cosine similarity.
 
-FastAPI
- - documents accepted as str content in JSONs - no document parsing 
- - used routes for clean architecture 
+**Two methods on the embedding class: `embed_document` and `embed_query`.**
+- Many transformers use a different routine for each, so exposing both keeps the
+  interface ready for a future model swap.
 
-FastAPI deferred
- - upload documents 
+---
 
+## Vector Store Seam
 
-Stores
- - services own the session_makers and they begin and end the transactions
- - sessions are past to the stores methods - we gain atomicity on writes while still keeping swappable seam
-   for the vector store 
- - added a small overhead on read operations + a bit more plumbing = services have to begin and end sessions
+**All vector access goes through a single swappable interface.**
 
-Document
- - storing hash of the content for dedup - two docs are duplicate if they have the same content
- - rejecting non character documents
+**Seam is currently a Protocol, not an ABC inheritance hierarchy.**
 
-No self-heal prefer Document dedup to self-heal = we store document and chunks without the vectors - try to store it again to get the vectors 
-we can't because of the dedup
+**The current seam is concrete, compatible-shaped classes — a formal, abstract
+`VectorStore` / `Embedder` Protocol is deferred.**
+- The `chunk_vectors → chunks` FK is pgvector-only and won't port to Chroma.
 
+**Chroma is a first-class dependency.**
+- Without a connection to ChromaDB the app won't start.
 
-Docker 
- - you need to set the LLM_API_KEY env var to enable generation
+**Search takes a similarity threshold.**
 
-Distribution model is "clone + build"
-The db bootstrap lives in lifespan of the api for v1 with Alembic it will be moved out.
+---
 
-Ingest takes content from the request body (path→content redesign)
- - documents are sent as content in the request body; the service no longer reads the filesystem
- - a path, if relevant, is just optional metadata
- - original content stored verbatim on the Document row (a `content` column), not reconstructed
-   from chunks: joining chunks duplicates the overlap region and drops boundary whitespace, so
-   it isn't faithful. Accepts storing content twice (row + chunks) for an exact, simple read.
- - dropped the `aiofiles` dependency: nothing reads files anymore.
+## Services
 
+**Ingestion / store orchestrator.**
+- On insert, the embedder blocks the whole event loop; accepted for v1.
+- Deferred: move embedding off the loop with `asyncio.to_thread`.
 
+**Retrieval.**
+- Deferred: cross-encoder re-ranking of the top-k.
 
-Chroma test suite
- - independent collections for each test - teardown after use
- - actual docker db - no AsyncClient in memory only synchronous which is unusable for this project
+**Prompt builder.**
+- No citations in v1.
 
- - default 8000 is already used for the api - fixed for the api is used 8080:8000 this means the
-   test suite chroma on port 8000 is unchanged
- - Chroma image has no curl/wget/python so we can't have a docker compose file healthcheck,
-   because of that we added the healthcheck to be app side - both to the app and the tests.
- - the `AsyncHttpClient`.make_client() does the db connection check - not lazily (tested)
-   that's why we retry the creation of client not just connect 
+**LLM client.**
+- v1 uses Gemini's free-tier Flash 2.5: fast answers, free for development. Note
+  the free tier trains on submitted queries — acceptable for v1.
+- The client is swappable.
+- Prompts go out over `httpx` directly — no extra dependency on an
+  `anthropic` / `openai` / … SDK.
+- Uses a shared `AsyncClient` for connection pooling, since we make the same HTTPS
+  call repeatedly. The `AsyncClient` is **injected** (cheaper, more testable, in
+  line with the project architecture) and is owned by the caller, not the
+  `LLMClient`.
 
-Chroma is first class dependency without connection to Chroma DB it app won't start
+---
 
-- tests run against the compose pg (profile test) in an
-  isolated rag_test db as raguser; pg now publishes host 5432; test-DB creds
-  couple DB_PASSWORD_TEST to POSTGRES_PASSWORD (same role). Plus the earlier
+## API & Infrastructure
 
-- api runs on port 8080
-- we use protocol for the vector seam instead of the ABC inheritance hierarchy
-- added threshold to search
+**FastAPI HTTP layer.**
+- Documents are accepted as `str` content inside JSON — no document parsing.
+- Uses routes for a clean architecture.
+- Deferred: document upload.
+- API runs on port **8080**.
 
+**`init_db()`: `CREATE EXTENSION vector` + `metadata.create_all`.**
+- `create_all` only creates missing tables; it never `ALTER`s an existing one, so
+  a model change silently leaves the live table on the old schema.
+- Dev workaround: drop and recreate.
+- `CREATE EXTENSION` needs a privileged role — fine in the local container, but a
+  deployment-time concern once it leaves the container.
+- Alembic deferred.
 
-CI
- - uses one compose up file instead of Github services because 
-   Chroma need to be in a compose file and we keep it unified 
- -> both through compose file
- - uses a creted and commited .env.ci file with test credentials against a test db
+**Docker / distribution.**
+- Set the `LLM_API_KEY` env var to enable generation.
+- Distribution model is "clone + build".
+- The DB bootstrap lives in the API lifespan for v1; with Alembic it will move out.
+
+---
+
+## Testing & CI
+
+**Chroma test suite.**
+- Each test gets an independent collection, torn down after use.
+- Runs against an actual Docker DB — Chroma's in-memory client is synchronous only,
+  which is unusable for this project.
+- Port split: the API's fixed mapping is `8080:8000`, so the test-suite Chroma can
+  keep the default port `8000` unchanged.
+- The Chroma image has no `curl`/`wget`/`python`, so a Docker Compose healthcheck
+  isn't possible; the healthcheck is done app-side, in both the app and the tests.
+- `AsyncHttpClient.make_client()` performs the DB connection check eagerly (tested),
+  not lazily — that's why we retry client *creation*, not just the connect.
+
+**Postgres test database.**
+- Tests run against the Compose Postgres (`test` profile) in an isolated `rag_test`
+  DB as `raguser`; Postgres now publishes host port `5432`.
+- Test-DB creds couple `DB_PASSWORD_TEST` to `POSTGRES_PASSWORD` (same role).
+
+**CI.**
+- Uses a single `compose up` file instead of GitHub services, because Chroma has to
+  be in a compose file and we keep everything unified — both go through the compose
+  file.
+- Uses a committed `.env.ci` file with test credentials against a test DB.
+
+---
+
+## Deferred / Out of Scope (v1)
+
+1. **`create_all` → Alembic.** `create_all` only creates missing tables; it never
+   `ALTER`s an existing one, so a model change silently leaves the live table on the
+   old schema. Dev workaround is drop + recreate.
+2. **Cross-encoder reranking of top-k.** v1 is bi-encoder retrieval only.
+3. **Orphan chunks — accepted.** No reconciliation / cleanup job. Orphan vectors are
+   prevented in the store orchestration.
+4. **Move embedding off the event loop** (`asyncio.to_thread`).
+5. **Dependency pinning.** `pyproject.toml` currently uses lower-bound `>=`
+   constraints, so a future package change could break us. Pin with a lockfile later.
+6. **`created_at` / audit columns.**
+7. **Broader out-of-scope set for v1:** auth, streaming, multiple collections, and
+    document upload.
