@@ -181,3 +181,9 @@ Chroma is first class dependency without connection to Chroma DB it app won't st
 - we use protocol for the vector seam instead of the ABC inheritance hierarchy
 - added threshold to search
 
+
+CI
+ - uses one compose up file instead of Github services because 
+   Chroma need to be in a compose file and we keep it unified 
+ -> both through compose file
+ - uses a creted and commited .env.ci file with test credentials against a test db

@@ -46,7 +46,7 @@ services:
         condition: service_started
     environment:
       # host is `pg` (the compose service name), not localhost.
-      DATABASE_URL: postgresql+asyncpg://raguser:${POSTGRES_PASSWORD:-ragpass}@pg:5432/ragdb
+      DATABASE_URL: postgresql+asyncpg://raguser:${POSTGRES_PASSWORD:-}@pg:5432/ragdb
       CHROMA_HOST: chroma
       CHROMA_PORT: 8000
       LLM_API_KEY: ${LLM_API_KEY:-}

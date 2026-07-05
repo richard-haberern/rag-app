@@ -1,0 +1,51 @@
+name: Python application
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to the same ref cancels an outdated in-progress run (cost saver;
+# does not change which events trigger CI).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Load CI environment
+      # Settings (config.py) reads the process environment; export .env.ci so every
+      # later step (pytest) sees DB_*_TEST etc. File is clean KEY=VALUE lines.
+      run: cat .env.ci >> "$GITHUB_ENV"
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        cache-dependency-path: pyproject.toml
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+    - name: Start services
+      # --wait blocks until pg is healthy (nothing depends_on it in the test profile).
+      run: docker compose --env-file .env.ci --profile test up -d --wait
+    - name: Lint with ruff
+      run: |
+        ruff check ./src
+    - name: Type checks with mypy
+      run: |
+        mypy ./src
+    - name: Test with pytest
+      run: |
+        pytest
+    - name: Service logs and cleanup
+      if: always()
+      run: |
+        docker compose --profile test logs
+        docker compose --profile test down -v
