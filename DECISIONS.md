@@ -165,7 +165,16 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Deferred: document upload.
 - API runs on port **8080**.
 
-**`init_db()`: `CREATE EXTENSION vector` + `metadata.create_all`.**
+**Schema bootstrap is split by vector backend.**
+- `init_db()` creates only the always-present relational schema: the documents and chunks
+  tables. These live in Postgres regardless of the chosen vector store.
+- `init_pgvector()` creates the pgvector extension + the `stored_vectors` table, and runs
+  **only** when `VECTOR_DB=Postgres`. In Chroma mode neither the extension nor the vectors
+  table is ever created.
+- `init.sql` (the container's fresh-volume init) no longer creates the extension — it only
+  creates the isolated `rag_test` database. Consumers that need the extension create it
+  themselves: the app via `init_pgvector` (Postgres mode), the test suite via its
+  `setup_schema` fixture.
 - `create_all` only creates missing tables; it never `ALTER`s an existing one, so
   a model change silently leaves the live table on the old schema.
 - Dev workaround: drop and recreate.
@@ -177,6 +186,12 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Set the `LLM_API_KEY` env var to enable generation.
 - Distribution model is "clone + build".
 - The DB bootstrap lives in the API lifespan for v1; with Alembic it will move out.
+- **Vector backend selection in the container.** `.env` is `.dockerignore`'d, so the app never
+  reads it inside the image; the choice is passed explicitly via compose
+  (`api.environment: VECTOR_DB: ${VECTOR_DB:-ChromaDB}`), substituted from the host env / project
+  `.env` at `up` time. Consequence: changing the backend needs a container recreate (not a code
+  rebuild), and a stale image will still run its own baked bootstrap — rebuild (`--build`) after
+  bootstrap changes.
 
 ---
 

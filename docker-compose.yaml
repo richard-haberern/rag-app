@@ -50,6 +50,10 @@ services:
       CHROMA_HOST: chroma
       CHROMA_PORT: 8000
       LLM_API_KEY: ${LLM_API_KEY:-}
+      # Vector backend selector. .env is .dockerignore'd so the app never reads it inside the
+      # container; the choice must be passed in here. Substituted from the host env / project
+      # .env at `up` time; defaults to ChromaDB. Set VECTOR_DB=Postgres to use pgvector.
+      VECTOR_DB: ${VECTOR_DB:-ChromaDB}
     ports:
       - "8080:8000"
 

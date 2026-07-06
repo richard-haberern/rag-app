@@ -12,7 +12,7 @@ from rag_app.config import get_settings
 def make_engine(url: str | None = None) -> AsyncEngine:
     if url is None:
         url = get_settings().sqlalchemy_url
-    return create_async_engine(url)
+    return create_async_engine(url, connect_args={"ssl": True})
 
 
 # factory function that exposes the session_maker

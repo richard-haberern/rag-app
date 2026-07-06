@@ -44,7 +44,7 @@ flowchart LR
         A[Document] --> B[Chunk]
         B --> C[Embed locally]
         C --> D[(Postgres DB for docs and chunks)]
-        C --> E[(Postgres pgvector extension for vectors)]
+        C --> E[(Vector store — ChromaDB default, or Postgres pgvector)]
     end
     subgraph Query
         Q[Query] --> R[Embed locally]
@@ -107,6 +107,11 @@ EOF
 docker compose up --build
 ```
 
+> 🔀 **Vector backend.** Defaults to ChromaDB. To use Postgres/pgvector instead, start with
+> `VECTOR_DB=Postgres docker compose up --build` (or set `VECTOR_DB` in `.env`). The setting is
+> passed into the api container by compose — the container does not read `.env` directly — so
+> switching backends needs a container recreate, and bootstrap changes need `--build`.
+
 > ⏳ **First build/run is slow.** The api image installs **PyTorch** (~a few GB), and
 > on first startup the embedding model is downloaded. Expect several minutes the first
 > time — later runs are fast.
@@ -116,7 +121,9 @@ Once it's up:
 - 🌐 API → <http://localhost:8000>
 - 📖 Interactive docs (Swagger) → <http://localhost:8000/docs>
 
-The database schema (pgvector extension + tables) is created automatically on startup.
+The database schema is created automatically on startup: the documents and chunks tables
+always, plus the pgvector extension and vectors table only when the Postgres vector backend is
+selected (`VECTOR_DB=Postgres`). The default backend is ChromaDB.
 
 ### Run locally (without Docker)
 

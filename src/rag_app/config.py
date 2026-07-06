@@ -2,6 +2,8 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from typing import Literal
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -52,6 +54,8 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-2.5-flash"
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/models"
     llm_timeout: float = 60.0
+
+    vector_db: Literal["ChromaDB", "Postgres"] = "ChromaDB"
 
     @property
     def sqlalchemy_url(self) -> str:
