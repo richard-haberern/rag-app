@@ -5,3 +5,10 @@ __pycache__
 .pytest_cache
 .env
 *.egg-info
+.env.ci
+tests/
+docker-compose*.yaml
+Dockerfile
+.dockerignore
+*.md
+.github/

@@ -4,15 +4,18 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncEngine,
 )
+from sqlalchemy.pool import Pool
 
 from rag_app.config import get_settings
 
 
 # factory function that exposes engine
-def make_engine(url: str | None = None) -> AsyncEngine:
+def make_engine(
+    url: str | None = None, poolclass: type[Pool] | None = None
+) -> AsyncEngine:
     if url is None:
         url = get_settings().sqlalchemy_url
-    return create_async_engine(url, connect_args={"ssl": True})
+    return create_async_engine(url, connect_args={"ssl": get_settings().db_ssl})
 
 
 # factory function that exposes the session_maker

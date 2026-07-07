@@ -75,6 +75,16 @@ deferred is intentionally out of scope for v1 — see the final section.
 **One shared async engine + `async_sessionmaker(expire_on_commit=False)`.**
 - DB credentials from `.env` (`DATABASE_URL`).
 
+**DB SSL is a per-env `DB_SSL` setting (default `false`).**
+- `make_engine` passes `connect_args={"ssl": DB_SSL}` to asyncpg. Managed Postgres
+  (Neon) requires SSL; the local + CI/test Postgres doesn't speak TLS and rejects an
+  SSL upgrade. One engine factory serves both, so the flag can't be hardcoded.
+- Deploy env sets `DB_SSL=true`; local/CI/tests inherit the `false` default.
+- Rejected auto-detecting SSL from the host (localhost → off) as too implicit — an
+  explicit per-env toggle is clearer.
+- Note: asyncpg wants `connect_args["ssl"]` (bool/SSLContext), **not** libpq's
+  `sslmode` URL query param.
+
 **Services own the session makers and the transaction boundaries.**
 - Sessions are passed into the store methods: we gain write atomicity while
   keeping the vector store seam swappable.

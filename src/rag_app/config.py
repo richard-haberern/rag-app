@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     db_name_test: str | None = None
     # Optional full override; if set, takes precedence over the DB_* parts above.
     database_url: str | None = None
+    # asyncpg SSL toggle. Off for local/CI/test Postgres (no TLS); Neon and other
+    # managed Postgres require it, so the deploy env sets DB_SSL=true.
+    db_ssl: bool = False
 
     # ChromaDB settings
     chroma_host: str = "localhost"
