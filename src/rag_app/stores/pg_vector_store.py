@@ -1,8 +1,7 @@
 from collections.abc import Sequence
-from typing import cast
 from uuid import UUID
 
-from numpy import ndarray
+from numpy import asarray
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -36,8 +35,8 @@ class PgVectorStore:
             vector = await session.get(Vector, chunk_id)
         if vector is None:
             raise ValueError(f"Vector for chunk {chunk_id} doesn't exist")
-        # always numpy float32 - just runtime check
-        return cast(ndarray, vector.content).tolist()
+        # if it is not an ndarray cast it if yes do nothing
+        return asarray(vector.content).tolist()
 
     async def search(
         self, query_vector: Embedding, k: int, threshold: float

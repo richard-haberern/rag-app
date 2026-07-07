@@ -1,8 +1,7 @@
 import asyncio
 from collections.abc import Sequence
 from uuid import UUID
-from numpy import ndarray
-from typing import cast
+from numpy import asarray
 
 from rag_app.schemas import Embedding
 from rag_app.stores.vector_store import _check_dim
@@ -87,7 +86,7 @@ class ChromaVectorStore:
         if embeddings is None or len(embeddings) == 0:
             raise ValueError(f"Vector for chunk {chunk_id} doesn't exist")
         # always numpy float32 - just runtime check
-        return cast(ndarray, embeddings[0]).tolist()
+        return asarray(embeddings[0]).tolist()
 
     async def search(
         self, query_vector: Embedding, k: int, threshold: float
