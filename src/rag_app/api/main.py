@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from httpx import AsyncClient
 
 from rag_app.api.routes import ingest, query, dev
@@ -77,6 +79,17 @@ app = FastAPI(
 app.include_router(ingest.router)
 app.include_router(query.router)
 app.include_router(dev.router)
+
+# Static frontend (homepage + demo). Mounted at "/" but registered AFTER the routers
+# and FastAPI's built-in /docs//redoc//openapi.json, and Starlette matches routes in
+# registration order — so the mount only catches paths nothing else claimed.
+# html=True makes "/" serve index.html. The directory is resolved relative to this
+# file (site-packages in Docker, src/ locally), not the CWD.
+app.mount(
+    "/",
+    StaticFiles(directory=Path(__file__).resolve().parents[1] / "static", html=True),
+    name="static",
+)
 
 
 # Service/store layers signal failures with plain exceptions; translate them to HTTP here so
