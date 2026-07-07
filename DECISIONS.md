@@ -140,6 +140,8 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **Search takes a similarity threshold.**
 
+**Chroma vector store searches ANN and doesn't have a secondary ordering rule which can lead to different found vectors than Postgres (pgvector) that does linear seach and has a deterministic search with ChunkID**
+
 ---
 
 ## Services
