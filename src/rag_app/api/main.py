@@ -83,11 +83,12 @@ app.include_router(dev.router)
 # Static frontend (homepage + demo). Mounted at "/" but registered AFTER the routers
 # and FastAPI's built-in /docs//redoc//openapi.json, and Starlette matches routes in
 # registration order — so the mount only catches paths nothing else claimed.
-# html=True makes "/" serve index.html. The directory is resolved relative to this
-# file (site-packages in Docker, src/ locally), not the CWD.
+# html=True makes "/" serve index.html. The directory comes from settings.static_dir
+# (env var STATIC_DIR): defaults to the repo-root static/ locally, and /app/static in
+# Docker (set by the Dockerfile). StaticFiles raises at startup if the dir is missing.
 app.mount(
     "/",
-    StaticFiles(directory=Path(__file__).resolve().parents[1] / "static", html=True),
+    StaticFiles(directory=get_settings().static_dir, html=True),
     name="static",
 )
 

@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from typing import Literal
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -59,6 +60,10 @@ class Settings(BaseSettings):
     llm_timeout: float = 60.0
 
     vector_db: Literal["ChromaDB", "Postgres"] = "ChromaDB"
+
+    # Directory served at "/" by the static mount. Default resolves to the repo-root
+    # static/ (works when run from the repo tree); Docker overrides via STATIC_DIR.
+    static_dir: str = str(Path(__file__).resolve().parents[2] / "static")
 
     @property
     def sqlalchemy_url(self) -> str:

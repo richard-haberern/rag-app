@@ -24,10 +24,11 @@ COPY src ./src
 RUN pip install --no-cache-dir --no-deps --force-reinstall .
 
 # ---- final: slim runtime, just the venv ----
-FROM python:3.12-slim
+FROM python:3.12-slim AS final
 
 COPY --from=builder /opt/venv /opt/venv
+COPY ./static /app/static
 ENV PATH="/opt/venv/bin:$PATH"
-
+ENV STATIC_DIR="/app/static"
 EXPOSE 8000
 CMD ["uvicorn", "rag_app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
