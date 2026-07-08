@@ -118,7 +118,8 @@ docker compose up --build
 
 Once it's up:
 
-- 🌐 API → <http://localhost:8000>
+- 🏠 Homepage (portfolio + contact) → <http://localhost:8000/>
+- 🧪 Live demo (ingest → retrieve → answer) → <http://localhost:8000/demo.html>
 - 📖 Interactive docs (Swagger) → <http://localhost:8000/docs>
 
 The database schema is created automatically on startup: the documents and chunks tables
@@ -148,13 +149,19 @@ curl -X POST http://localhost:8000/ingest/store \
       }'
 # → "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
-# 2. Ask a question — the answer is grounded in your ingested documents
+# 2. See what retrieval finds — the top-k chunks for a query, in similarity order
+curl -X POST http://localhost:8000/query/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What does the fox jump over?"}'
+# → ["The quick brown fox jumps over the lazy dog."]
+
+# 3. Ask a question — the answer is grounded in your ingested documents
 curl -X POST http://localhost:8000/query/generate \
   -H "Content-Type: application/json" \
   -d '{"query": "What does the fox jump over?"}'
 # → "The fox jumps over the lazy dog."
 
-# 3. (optional) Fetch a stored document by id
+# 4. (optional) Fetch a stored document by id
 curl http://localhost:8000/query/documents/3fa85f64-5717-4562-b3fc-2c963f66afa6
 ```
 
@@ -172,6 +179,7 @@ src/rag_app/
   embeddings/   # sentence-transformers wrapper
   llm/          # LLM client + factory + prompter
   db/           # engine, base, startup bootstrap
+  static/       # homepage + demo frontend (plain HTML/CSS/JS, no build step)
 tests/
 ```
 

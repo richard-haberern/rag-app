@@ -33,6 +33,11 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Non-.py files setuptools must copy into the installed package. The Docker image runs
+# rag_app from site-packages (no repo tree), so the frontend ships as package data.
+[tool.setuptools.package-data]
+rag_app = ["static/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"

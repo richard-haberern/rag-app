@@ -177,6 +177,28 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Deferred: document upload.
 - API runs on port **8080**.
 
+**Additive `POST /query/retrieve` endpoint for the demo frontend.**
+- The demo must *show* retrieval (the chunks are the proof the pipeline works), but
+  `/query/generate` returns only the answer string. Rather than change its response
+  shape (an API contract break), retrieval is exposed as a separate additive endpoint.
+- Response is `list[str]` (chunk contents in similarity order) because that is what
+  `RetrievalService.search_topk_chunks` returns — scores never cross the service
+  boundary, so the endpoint can't expose them without a core-signature change (deferred).
+- Uses the same `RETRIEVAL_TOP_K` / `RETRIEVAL_THRESHOLD` defaults as generation. The
+  demo calls retrieve + generate concurrently, so retrieval work runs twice per demo
+  query; accepted for v1.
+
+**Static frontend served by FastAPI from package data.**
+- Homepage (`/`) + demo (`/demo.html`) are plain HTML/CSS/vanilla JS in
+  `src/rag_app/static/` — no build step, no node, no CDN libs, zero new Python deps
+  (`StaticFiles` ships with Starlette).
+- Mounted at `/` with `html=True`, registered *after* all routers, so `/docs`,
+  `/openapi.json` and the API routes always win — the mount only catches leftovers.
+- Assets live **inside the package** and are declared as setuptools `package-data`
+  because the Docker image ships only the installed venv (no repo tree); a repo-root
+  `static/` dir would exist locally but not in the container.
+- The frontend uses relative fetch URLs (same origin), so no CORS middleware is needed.
+
 **Schema bootstrap is split by vector backend.**
 - `init_db()` creates only the always-present relational schema: the documents and chunks
   tables. These live in Postgres regardless of the chosen vector store.
