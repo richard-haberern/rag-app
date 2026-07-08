@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG App — v1 demo · student portfolio project</title>
+  <meta name="description" content="Backend-first retrieval-augmented generation app: ingest, embed, retrieve, generate.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="site-header wrap">
+    <a class="brand" href="/">RAG App</a>
+    <nav class="site-nav" aria-label="Site">
+      <a href="/demo.html">Demo</a>
+      <a href="/docs">API docs</a>
+      <a id="nav-github" target="_blank" rel="noopener" href="#">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <p class="eyebrow">v1 demo · student portfolio project</p>
+      <h1>Retrieval-augmented generation, built backend-first.</h1>
+      <p class="lede">
+        Ingest a document, chunk and embed it locally, retrieve the most relevant
+        pieces with vector search, and let an LLM answer with that context —
+        a complete RAG pipeline behind a small JSON API.
+      </p>
+      <ul class="pipeline" aria-label="Pipeline stages">
+        <li>ingest</li>
+        <li>chunk</li>
+        <li>embed</li>
+        <li>store</li>
+        <li>retrieve</li>
+        <li>generate</li>
+      </ul>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="/demo.html">Try the live demo</a>
+        <a class="btn btn-secondary" href="/docs">Browse the API</a>
+      </div>
+    </section>
+
+    <section class="note" aria-labelledby="about-heading">
+      <h2 id="about-heading">What this is</h2>
+      <p>
+        A first real version, not a product: the goal was a correct end-to-end RAG
+        backend with every line understood — FastAPI (async), PostgreSQL via async
+        SQLAlchemy, local sentence-transformers embeddings, and Gemini for generation.
+        Auth, streaming and reranking are deliberately out of scope for v1.
+      </p>
+      <p>
+        The architectural bit worth a look: all vector access goes through one
+        swappable vector-store interface, so the same app runs on pgvector or ChromaDB
+        by flipping a single config value — the store never embeds, it only stores and
+        searches vectors produced elsewhere.
+      </p>
+    </section>
+
+    <section aria-labelledby="contact-heading">
+      <h2 id="contact-heading">Contact</h2>
+      <div class="card">
+        <ul class="contact-list">
+          <li><span class="label">name</span><span id="contact-name"></span></li>
+          <li><span class="label">linkedin</span><a id="contact-linkedin" target="_blank" rel="noopener"></a></li>
+          <li><span class="label">github</span><a id="contact-github" target="_blank" rel="noopener"></a></li>
+
+          <li><span class="label">email</span><a id="contact-email"></a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span id="footer-name"></span> · RAG App v1 · <a href="/docs">OpenAPI docs</a>
+    </div>
+  </footer>
+
+  <script src="/config.js"></script>
+  <script>
+    // Fill the contact block from config.js so links live in exactly one file.
+    const set = (id, text, href) => {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      if (href !== undefined) el.href = href;
+    };
+    set("contact-name", CONTACT.name);
+    set("footer-name", CONTACT.name);
+    set("contact-linkedin", CONTACT.linkedin, CONTACT.linkedin);
+    set("contact-github", CONTACT.github, CONTACT.github);
+    set("contact-email", CONTACT.email, "mailto:" + CONTACT.email);
+    set("nav-github", "GitHub", CONTACT.github);
+  </script>
+</body>
+</html>
