@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Depends
 
-from typing import Annotated
+from typing import Annotated, Sequence
 from pydantic import BaseModel
 from uuid import UUID
 
@@ -18,6 +18,14 @@ router = APIRouter(prefix="/query")
 class DocumentResponse(BaseModel):
     filename: str
     content: str
+    doc_id: UUID
+    doc_metadata: dict
+
+
+# Metadata-only view for listing stored documents: deliberately omits `content` so a
+# corpus-wide listing doesn't ship every document's full text.
+class DocumentSummary(BaseModel):
+    filename: str
     doc_id: UUID
     doc_metadata: dict
 
@@ -57,3 +65,25 @@ async def get_document(
         doc_id=doc.id,
         doc_metadata=doc.doc_metadata,
     )
+
+
+@router.get("/stored_documents/ids")
+async def get_stored_documents_ids(
+    retriever: Annotated[RetrievalService, Depends(get_retriever)],
+) -> Sequence[UUID]:
+    return await retriever.get_stored_documents_ids()
+
+
+@router.get("/stored_documents/metadata")
+async def get_stored_documents_metadata(
+    retriever: Annotated[RetrievalService, Depends(get_retriever)],
+) -> Sequence[DocumentSummary]:
+    docDTOs = await retriever.get_stored_documents_DTOs()
+    return [
+        DocumentSummary(
+            filename=d.filename,
+            doc_id=d.id,
+            doc_metadata=d.doc_metadata,
+        )
+        for d in docDTOs
+    ]

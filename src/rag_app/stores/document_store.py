@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from typing import Sequence
+
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +40,20 @@ class DocStore:
         if doc is None:
             raise DocumentNotFound(f"Document {id} doesn't exist")
         return doc.content
+
+    async def get_stored_documents(
+        self, session: AsyncSession
+    ) -> Sequence[DocumentDTO]:
+        result = await session.execute(select(Document))
+        docs = result.scalars().all()
+        return [
+            DocumentDTO(d.id, d.filename, d.content_hash, d.content, d.doc_metadata)
+            for d in docs
+        ]
+
+    async def get_stored_documents_ids(self, session: AsyncSession) -> Sequence[UUID]:
+        result = await session.execute(select(Document.id))
+        return result.scalars().all()
 
     async def remove_document(self, session: AsyncSession, id: UUID) -> None:
         doc = await session.get(Document, id)

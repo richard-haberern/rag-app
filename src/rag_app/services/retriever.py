@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from typing import Sequence
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rag_app.chunkings.chunker import Chunker
@@ -61,3 +63,11 @@ class RetrievalService:
     async def get_document(self, id: UUID) -> DocumentDTO:
         async with self._session_factory.begin() as session:
             return await self.doc_store.get_document(session, id)
+
+    async def get_stored_documents_ids(self) -> Sequence[UUID]:
+        async with self._session_factory.begin() as session:
+            return await self.doc_store.get_stored_documents_ids(session)
+
+    async def get_stored_documents_DTOs(self) -> Sequence[DocumentDTO]:
+        async with self._session_factory.begin() as session:
+            return await self.doc_store.get_stored_documents(session)
