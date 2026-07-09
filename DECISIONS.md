@@ -149,6 +149,17 @@ deferred is intentionally out of scope for v1 — see the final section.
 **Ingestion / store orchestrator.**
 - On insert, the embedder blocks the whole event loop; accepted for v1.
 - Deferred: move embedding off the loop with `asyncio.to_thread`.
+- **Document removal** goes through `VectorStore.remove_vectors` explicitly rather than
+  relying on the pg cascade: deleting a `Document` cascades to chunks and the pg
+  `stored_vectors` table, but that cascade never reaches an external store (Chroma), so
+  the service must purge it via the interface.
+- Ordering mirrors `store_document`: delete the pg document first (authoritative), then
+  purge the external vectors. A Chroma-purge failure therefore leaves orphan vectors
+  whose chunk ids no longer resolve — symmetric with the store path's "vectors added
+  after commit" window. See Deferred #3 (orphan chunks/vectors accepted, no reconciler).
+- Chunk ids are read *before* the delete (the cascade removes chunks) via the new
+  `ChunkStore.get_chunk_ids_by_document`, which returns `[]` for a document with no
+  chunks instead of raising like `get_chunks_by_document` (empty is a valid delete state).
 
 **Retrieval.**
 - Deferred: cross-encoder re-ranking of the top-k.
@@ -176,6 +187,34 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Uses routes for a clean architecture.
 - Deferred: document upload.
 - API runs on port **8080**.
+
+**Exception architecture.**
+- One root, `AppError` (`rag_app/exceptions`), for every error the app raises on purpose.
+  Each class carries a `status_code`, so a **single** `@app.exception_handler(AppError)`
+  turns any subclass into a response (Starlette dispatches to the most specific registered
+  class by MRO). Per-type handlers are therefore unnecessary and were removed.
+- The tree splits by responsibility, not just by name:
+  - `RagError` (4xx, client): `DocumentNotFound` (404), `EmptyDocument` (422),
+    `QueryError` (413).
+  - `InternalError` (5xx, invariant violations): `ChunkNotFound`, `VectorNotFound` — these
+    mean the data is inconsistent (a chunk with no vector, a document with no chunks), not
+    that the client asked for something missing, so they are **not** 404s. Both are
+    internal-only today (no routed caller); kept for defense-in-depth.
+  - `LLMError` (502, upstream): wraps **all** httpx failures (status, timeout, connection)
+    raised in `LLMClient.generate`, plus `LLMBadAnswer` for a malformed 200 body. Reports
+    the upstream status code only — `str(exc)` would leak the Gemini URL.
+- A last-resort `@app.exception_handler(Exception)` returns a generic 500 envelope so
+  nothing unforeseen leaks internals.
+- Removed the old `OSError → 404` handler (the request path no longer touches the
+  filesystem; a stray socket error mapping to 404 was misleading) and the blanket
+  `ValueError → 500` (genuinely-internal `ValueError`s fall through to the catch-all).
+- The exceptions module holds plain int status codes and does **not** import FastAPI —
+  the domain layer stays decoupled from the web framework.
+- Duplicate `content_hash` now returns **409 `DocumentExists`** (contract change — was a
+  silent no-op that still returned a fresh `doc_id`). Detected by the `exists()` pre-check for
+  the common case plus an `except IntegrityError` guard in `store_document` for the concurrent
+  TOCTOU race. Assumes `content_hash` is the only unique constraint a fresh-`uuid4` insert can
+  violate in that transaction; narrowing to the constraint name is a possible later refinement.
 
 **Additive `POST /query/retrieve` endpoint for the demo frontend.**
 - The demo must *show* retrieval (the chunks are the proof the pipeline works), but
