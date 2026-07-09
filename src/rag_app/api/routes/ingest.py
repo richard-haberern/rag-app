@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 from fastapi import Depends
 
 from pydantic import BaseModel
@@ -39,3 +39,11 @@ async def store_document(
         )
     )
     return doc_id
+
+
+@router.delete("/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_document(
+    doc_id: UUID,
+    ingestor: Annotated[IngestionService, Depends(get_ingestor)],
+) -> None:
+    await ingestor.remove_document(doc_id)

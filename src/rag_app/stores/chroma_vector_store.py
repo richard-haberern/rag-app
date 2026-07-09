@@ -11,6 +11,8 @@ from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.async_api import AsyncClientAPI
 from chromadb import AsyncHttpClient
 
+from rag_app.exceptions import VectorNotFound
+
 
 async def make_client() -> AsyncClientAPI:
     host = get_settings().chroma_host
@@ -84,9 +86,15 @@ class ChromaVectorStore:
         embeddings = results["embeddings"]
         # missing id -> empty list (not None); None only if embeddings weren't included
         if embeddings is None or len(embeddings) == 0:
-            raise ValueError(f"Vector for chunk {chunk_id} doesn't exist")
+            raise VectorNotFound(f"Vector for chunk {chunk_id} doesn't exist")
         # always numpy float32 - just runtime check
         return asarray(embeddings[0]).tolist()
+
+    async def remove_vector(self, chunk_id: UUID) -> None:
+        await self.collection.delete(ids=[str(chunk_id)])
+
+    async def remove_vectors(self, chunk_ids: Sequence[UUID]) -> None:
+        await self.collection.delete(ids=[str(ch_id) for ch_id in chunk_ids])
 
     async def search(
         self, query_vector: Embedding, k: int, threshold: float

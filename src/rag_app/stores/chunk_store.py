@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rag_app.models.chunk import Chunk
 from rag_app.schemas import ChunkDTO
 
+from rag_app.exceptions import ChunkNotFound
+
 
 def _to_dto(chunk: Chunk) -> ChunkDTO:
     return ChunkDTO(
@@ -36,7 +38,7 @@ class ChunkStore:
     async def get_chunk(self, session: AsyncSession, id: UUID) -> ChunkDTO:
         chunk = await session.get(Chunk, id)
         if chunk is None:
-            raise ValueError(f"Chunk {id} doesn't exist")
+            raise ChunkNotFound(f"Chunk {id} doesn't exist")
         return _to_dto(chunk)
 
     async def get_chunks_by_ids(
@@ -59,5 +61,15 @@ class ChunkStore:
         )
         chunks = list(result.scalars())
         if not chunks:
-            raise ValueError(f"No chunks to document with {document_id}")
+            raise ChunkNotFound(f"No chunks to document with {document_id}")
         return [_to_dto(c) for c in chunks]
+
+    async def get_chunk_ids_by_document(
+        self, session: AsyncSession, document_id: UUID
+    ) -> list[UUID]:
+        # Deletion-side counterpart to get_chunks_by_document: an empty result is a valid
+        # state (nothing to purge), so this returns [] instead of raising.
+        result = await session.execute(
+            select(Chunk.id).where(Chunk.document_id == document_id)
+        )
+        return list(result.scalars())

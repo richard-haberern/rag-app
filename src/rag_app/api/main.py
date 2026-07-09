@@ -24,6 +24,7 @@ from rag_app.stores.chroma_vector_store import (
 )
 from rag_app.config import get_settings
 from rag_app.stores.pg_vector_store import PgVectorStore
+from rag_app.exceptions import AppError
 
 
 @asynccontextmanager
@@ -43,7 +44,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.client = await connect()  # blocks until the Chroma server is ready
         app.state.vec_store = ChromaVectorStore(await make_collection(app.state.client))
     elif get_settings().vector_db == "Postgres":
-        await init_pgvector(app.state.engine)  # extension + vectors table, PG-backend only
+        await init_pgvector(
+            app.state.engine
+        )  # extension + vectors table, PG-backend only
         app.state.vec_store = PgVectorStore(app.state.session_maker)
     app.state.ingestor = IngestionService(
         app.state.doc_store,
@@ -92,15 +95,14 @@ app.mount(
 )
 
 
-# Service/store layers signal failures with plain exceptions; translate them to HTTP here so
-# they don't surface as opaque 500s. ValueError = bad input (over-long query, invalid/empty
-# path). OSError = a referenced file is gone. NOTE: document-not-found is also a ValueError, so
-# it currently maps to 400, not 404 — a precise 404 needs a dedicated NotFoundError (deferred).
-@app.exception_handler(ValueError)
-async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+# Every deliberate app error carries its own status_code, so one handler covers the whole
+# AppError tree (Starlette dispatches to the most specific registered class by MRO).
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
 
 
-@app.exception_handler(OSError)
-async def os_error_handler(request: Request, exc: OSError) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
+# Last-resort envelope for anything unforeseen: consistent JSON shape, no internal leak.
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"detail": "Internal server error."})

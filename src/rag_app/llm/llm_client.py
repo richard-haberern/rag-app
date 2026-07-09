@@ -1,4 +1,5 @@
 import httpx
+from rag_app.exceptions import LLMBadAnswer, LLMError
 
 
 class LLMClient:
@@ -16,8 +17,16 @@ class LLMClient:
 
     async def generate(self, prompt: str) -> str:
         req_body = {"contents": [{"parts": [{"text": prompt}]}]}
-        resp = await self._client.post(self._url, json=req_body)
-        resp.raise_for_status()
+        # Any upstream failure (4xx/5xx, timeout, connection drop) becomes an LLMError so it
+        # surfaces as a 502, not an opaque 500. Report the status code only — str(exc) on a
+        # status error embeds the Gemini URL, which shouldn't leak to the client.
+        try:
+            resp = await self._client.post(self._url, json=req_body)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise LLMError(f"LLM upstream returned {exc.response.status_code}") from exc
+        except httpx.HTTPError as exc:
+            raise LLMError("LLM request failed") from exc
         return self._extract_text(resp.json())
 
     @staticmethod
@@ -28,4 +37,4 @@ class LLMClient:
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(f"LLM returned no usable answer: {data!r}") from exc
+            raise LLMBadAnswer(f"LLM returned no usable answer: {data!r}") from exc

@@ -8,6 +8,7 @@ from rag_app.schemas import DocumentDTO
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.stores.document_store import DocStore
 from rag_app.stores.vector_store import VectorStore
+from rag_app.exceptions import QueryTooLong
 
 
 class RetrievalService:
@@ -37,7 +38,7 @@ class RetrievalService:
             self.chunker.tokenizer(query, add_special_tokens=False)["input_ids"]
         )
         if q_size > self.chunker.max_size:
-            raise ValueError(
+            raise QueryTooLong(
                 f"Your query is too long {q_size}, max size for query is {self.chunker.max_size}"
             )
         q_vector: list[float] = self.embedder.embed_query(query)[0]

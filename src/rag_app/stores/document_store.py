@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rag_app.models.document import Document
 
 from rag_app.schemas import DocumentDTO
+from rag_app.exceptions import DocumentNotFound
 
 
 class DocStore:
@@ -23,7 +24,7 @@ class DocStore:
     async def get_document(self, session: AsyncSession, id: UUID) -> DocumentDTO:
         doc = await session.get(Document, id)
         if doc is None:
-            raise ValueError(f"Document {id} doesn't exist")
+            raise DocumentNotFound(f"Document {id} doesn't exist")
         return DocumentDTO(
             id=doc.id,
             filename=doc.filename,
@@ -35,13 +36,13 @@ class DocStore:
     async def get_document_content(self, session: AsyncSession, id: UUID) -> str:
         doc = await session.get(Document, id)
         if doc is None:
-            raise ValueError(f"Document {id} doesn't exist")
+            raise DocumentNotFound(f"Document {id} doesn't exist")
         return doc.content
 
     async def remove_document(self, session: AsyncSession, id: UUID) -> None:
         doc = await session.get(Document, id)
         if doc is None:
-            raise ValueError(f"Document {id} doesn't exist")
+            raise DocumentNotFound(f"Document {id} doesn't exist")
         await session.delete(doc)
 
     async def exists(self, session: AsyncSession, doc: DocumentDTO) -> bool:

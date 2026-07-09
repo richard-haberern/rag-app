@@ -2,12 +2,13 @@ from collections.abc import Sequence
 from uuid import UUID
 
 from numpy import asarray
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rag_app.models.vector import Vector
 from rag_app.schemas import Embedding
 from rag_app.stores.vector_store import _check_dim
+from rag_app.exceptions import VectorNotFound
 
 
 class PgVectorStore:
@@ -34,9 +35,19 @@ class PgVectorStore:
         async with self.session_maker.begin() as session:
             vector = await session.get(Vector, chunk_id)
         if vector is None:
-            raise ValueError(f"Vector for chunk {chunk_id} doesn't exist")
+            raise VectorNotFound(f"Vector for chunk {chunk_id} doesn't exist")
         # if it is not an ndarray cast it if yes do nothing
         return asarray(vector.content).tolist()
+
+    async def remove_vector(self, chunk_id: UUID) -> None:
+        async with self.session_maker.begin() as session:
+            stmt = delete(Vector).where(Vector.chunk_id == chunk_id)
+            await session.execute(stmt)
+
+    async def remove_vectors(self, chunk_ids: Sequence[UUID]) -> None:
+        async with self.session_maker.begin() as session:
+            stmt = delete(Vector).where(Vector.chunk_id.in_(chunk_ids))
+            await session.execute(stmt)
 
     async def search(
         self, query_vector: Embedding, k: int, threshold: float
