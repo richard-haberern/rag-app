@@ -27,9 +27,11 @@ class EmptyDocument(RagError):
     status_code = 422
     default_message = "Document has no usable content."
 
+
 class DocumentExists(RagError):
     status_code = 409
     default_message = "Document with same content already exists."
+
 
 class QueryTooLong(RagError):
     status_code = 413
