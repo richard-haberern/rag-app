@@ -408,3 +408,49 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
             await chunk_store.get_chunks_by_document(s2, doc.id)
     with pytest.raises(ValueError):
         await pg_vector_store.get_vector_values_by_chunk_id(ch_ids[0])
+
+
+async def test_vector_store_threshold(
+    vec_store,
+    doc_store,
+    chunk_store,
+    session,
+    db_tests,
+    settings_session
+    ):
+    
+    doc = DocumentDTO(
+        uuid4(),
+        "file1.txt",
+        "0123456789abcdef",
+        "some amazing content in the file",
+        {"creator": "assasino", "size": 100},
+    )
+    await doc_store.add_document(session, doc)
+    ch_ids = [uuid4() for i in range(5)]
+    chunks = [
+        ChunkDTO(ch_ids[0], "Python 3.14 introduced some new feature regarding GIL", doc.id, 0),
+        ChunkDTO(ch_ids[1], "The sun is shining bright", doc.id, 1),
+        ChunkDTO(ch_ids[2], "Python is a good programming language and it is also interpreted", doc.id, 2),
+        ChunkDTO(ch_ids[3], "Water is blue and ocean has a lot of water", doc.id, 3),
+        ChunkDTO(ch_ids[4], "Dogs and cats live at home except sometimes they don't.", doc.id, 4),
+    ]
+    await chunk_store.add_chunks(session, chunks)
+    await session.commit()
+
+    vectors = []    
+    for i in range(5):
+        embed = [0 for i in range(settings_session.embed_dim)]
+        embed[i] = 1
+        vectors.append(embed)
+    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+
+    query = [0 for i in range(settings_session.embed_dim)]
+    query[0] = 8
+    query[1] = 9
+    query[2] = 3
+    query[3] = 1
+    query[4] = 1
+    res = await vec_store.search(query, 5, 0.6)
+    for _, res_dist in res:
+        assert res_dist <= 0.6
