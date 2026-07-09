@@ -10,7 +10,13 @@ from uuid import uuid4
 from rag_app.chunkings.chunker import Chunker
 from rag_app.schemas import DocumentDTO
 from rag_app.services.ingestor import IngestionService
-from rag_app.exceptions import DocumentNotFound, EmptyDocument, DocumentExists
+from rag_app.services.retriever import RetrievalService
+from rag_app.exceptions import (
+    DocumentNotFound,
+    VectorNotFound,
+    EmptyDocument,
+    DocumentExists,
+)
 
 
 # 40 whitespace-tokens; with max_size=20 / overlap=5 the FakeTokenizer windowing yields 3 chunks
@@ -20,12 +26,22 @@ _EXPECTED_CHUNKS = 3
 
 
 def _make_ingestor(
-    engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
+    engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
 ):
     chunker = Chunker(fake_tokenizer, 20, 5)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return IngestionService(
-        doc_store, chunk_store, pg_vector_store, fake_embedder, chunker, session_factory
+        doc_store, chunk_store, vec_store, fake_embedder, chunker, session_factory
+    )
+
+
+def _make_retriever(
+    engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+):
+    chunker = Chunker(fake_tokenizer, 20, 5)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    return RetrievalService(
+        chunk_store, vec_store, doc_store, fake_embedder, chunker, session_factory
     )
 
 
@@ -33,7 +49,7 @@ async def test_store_document_persists_doc_chunks_vectors(
     engine,
     doc_store,
     chunk_store,
-    pg_vector_store,
+    vec_store,
     fake_embedder,
     fake_tokenizer,
     new_session,
@@ -43,7 +59,7 @@ async def test_store_document_persists_doc_chunks_vectors(
         uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, {"creator": "ambulance"}
     )
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
 
     await ingestor.store_document(doc)
@@ -52,7 +68,7 @@ async def test_store_document_persists_doc_chunks_vectors(
         ret_doc = await doc_store.get_document(s, doc.id)
         chunks = await chunk_store.get_chunks_by_document(s, doc.id)
         vectors = [
-            await pg_vector_store.get_vector_values_by_chunk_id(ch.id) for ch in chunks
+            await vec_store.get_vector_values_by_chunk_id(ch.id) for ch in chunks
         ]
 
     assert ret_doc.id == doc.id
@@ -68,7 +84,7 @@ async def test_store_document_dedupes_on_content_hash(
     engine,
     doc_store,
     chunk_store,
-    pg_vector_store,
+    vec_store,
     fake_embedder,
     fake_tokenizer,
     new_session,
@@ -79,7 +95,7 @@ async def test_store_document_dedupes_on_content_hash(
     doc1 = DocumentDTO(uuid4(), "first.txt", "same-hash", _FORTY_WORDS, {})
     doc2 = DocumentDTO(uuid4(), "second.txt", "same-hash", _FORTY_WORDS, {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
 
     await ingestor.store_document(doc1)
@@ -101,15 +117,108 @@ async def test_store_document_rejects_whitespace_only(
     engine,
     doc_store,
     chunk_store,
-    pg_vector_store,
+    vec_store,
     fake_embedder,
     fake_tokenizer,
     db_tests,
 ):
     doc = DocumentDTO(uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
 
     with pytest.raises(EmptyDocument):
         await ingestor.store_document(doc)
+
+
+async def test_remove_document(
+    engine,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+    new_session,
+):
+    doc = DocumentDTO(uuid4(), "first.txt", "hash-of-the-file", _FORTY_WORDS, {})
+    ingestor = _make_ingestor(
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    retriever = _make_retriever(
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    await ingestor.store_document(doc)
+    async with new_session() as s:
+        ch_ids = await chunk_store.get_chunk_ids_by_document(s, doc.id)
+    await ingestor.remove_document(doc.id)
+    with pytest.raises(DocumentNotFound):
+        await retriever.get_document(doc.id)
+    async with new_session() as s:
+        assert await chunk_store.get_chunks_by_ids(s, ch_ids) == []
+    for ch_id in ch_ids:
+        with pytest.raises(VectorNotFound):
+            await vec_store.get_vector_values_by_chunk_id(ch_id)
+
+
+async def test_get_stored_documents_ids(
+    engine,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+    new_session,
+):
+    ingestor = _make_ingestor(
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    retriever = _make_retriever(
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    docs_info = [
+        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), {})
+        for i in range(4)
+    ]
+    docs = [DocumentDTO(id, n, h, c, m) for id, n, h, c, m in docs_info]
+    for doc in docs:
+        await ingestor.store_document(doc)
+
+    docs_ids = await retriever.get_stored_documents_ids()
+    assert set(docs_ids) == {doc_info[0] for doc_info in docs_info}
+
+
+async def test_get_stored_documents_full_info(
+    engine,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+    new_session,
+):
+    ingestor = _make_ingestor(
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    retriever = _make_retriever(
+        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    docs_info = [
+        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), {})
+        for i in range(4)
+    ]
+    docs = [DocumentDTO(id, n, h, c, m) for id, n, h, c, m in docs_info]
+    for doc in docs:
+        await ingestor.store_document(doc)
+
+    docDTOs = await retriever.get_stored_documents_DTOs()
+    by_id = {d.id: d for d in docDTOs}
+    assert set(by_id) == {doc_info[0] for doc_info in docs_info}
+    for id_, name, content_hash, content, metadata in docs_info:
+        d = by_id[id_]
+        assert d.filename == name
+        assert d.content_hash == content_hash
+        assert d.content == content
+        assert d.doc_metadata == metadata
