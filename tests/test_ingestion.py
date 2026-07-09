@@ -10,6 +10,7 @@ from uuid import uuid4
 from rag_app.chunkings.chunker import Chunker
 from rag_app.schemas import DocumentDTO
 from rag_app.services.ingestor import IngestionService
+from rag_app.exceptions import DocumentNotFound, EmptyDocument, DocumentExists
 
 
 # 40 whitespace-tokens; with max_size=20 / overlap=5 the FakeTokenizer windowing yields 3 chunks
@@ -82,11 +83,12 @@ async def test_store_document_dedupes_on_content_hash(
     )
 
     await ingestor.store_document(doc1)
-    await ingestor.store_document(doc2)
+    with pytest.raises(DocumentExists):
+        await ingestor.store_document(doc2)
 
     async with new_session() as s:
         assert (await doc_store.get_document(s, doc1.id)).id == doc1.id
-        with pytest.raises(ValueError):
+        with pytest.raises(DocumentNotFound):
             await doc_store.get_document(s, doc2.id)
         # Only doc1's chunks exist; doc2 never got past the dedupe short-circuit.
         assert (
@@ -109,5 +111,5 @@ async def test_store_document_rejects_whitespace_only(
         engine, doc_store, chunk_store, pg_vector_store, fake_embedder, fake_tokenizer
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(EmptyDocument):
         await ingestor.store_document(doc)

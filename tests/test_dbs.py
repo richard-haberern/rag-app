@@ -1,5 +1,6 @@
 import pytest
 from rag_app.schemas import DocumentDTO, ChunkDTO
+from rag_app.exceptions import DocumentNotFound, ChunkNotFound, VectorNotFound
 from uuid import uuid4
 
 
@@ -24,7 +25,7 @@ async def test_doc_store_roundtrip(doc_store, session, new_session, db_tests):
 
 
 async def test_doc_store_get_non_existing(doc_store, session, db_tests):
-    with pytest.raises(ValueError):
+    with pytest.raises(DocumentNotFound):
         await doc_store.get_document(session, uuid4())
 
 
@@ -40,7 +41,7 @@ async def test_doc_store_remove(doc_store, session, new_session, db_tests):
     await doc_store.remove_document(session, doc.id)
     await session.commit()
     async with new_session() as s2:
-        with pytest.raises(ValueError):
+        with pytest.raises(DocumentNotFound):
             await doc_store.get_document(s2, doc.id)
 
 
@@ -138,12 +139,12 @@ async def test_chunk_store_roundtrip_by_doc_id(
 
 
 async def test_chunk_store_no_chunk_exception(chunk_store, session, db_tests):
-    with pytest.raises(ValueError):
+    with pytest.raises(ChunkNotFound):
         await chunk_store.get_chunk(session, uuid4())
 
 
 async def test_chunk_store_no_chunks_doc_id_exception(chunk_store, session, db_tests):
-    with pytest.raises(ValueError):
+    with pytest.raises(ChunkNotFound):
         await chunk_store.get_chunks_by_document(session, uuid4())
 
 
@@ -259,7 +260,7 @@ async def test_vec_store_get_values_by_chunk_id_eror(
     await session.commit()
     vectors = fake_embedder.embed_document([ch.content for ch in chunks])
     await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
-    with pytest.raises(ValueError):
+    with pytest.raises(VectorNotFound):
         await vec_store.get_vector_values_by_chunk_id(uuid4())
 
 
@@ -404,21 +405,16 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     await session.commit()
 
     async with new_session() as s2:
-        with pytest.raises(ValueError):
+        with pytest.raises(ChunkNotFound):
             await chunk_store.get_chunks_by_document(s2, doc.id)
-    with pytest.raises(ValueError):
+    with pytest.raises(VectorNotFound):
         await pg_vector_store.get_vector_values_by_chunk_id(ch_ids[0])
 
 
 async def test_vector_store_threshold(
-    vec_store,
-    doc_store,
-    chunk_store,
-    session,
-    db_tests,
-    settings_session
-    ):
-    
+    vec_store, doc_store, chunk_store, session, db_tests, settings_session
+):
+
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
@@ -429,16 +425,31 @@ async def test_vector_store_threshold(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(5)]
     chunks = [
-        ChunkDTO(ch_ids[0], "Python 3.14 introduced some new feature regarding GIL", doc.id, 0),
+        ChunkDTO(
+            ch_ids[0],
+            "Python 3.14 introduced some new feature regarding GIL",
+            doc.id,
+            0,
+        ),
         ChunkDTO(ch_ids[1], "The sun is shining bright", doc.id, 1),
-        ChunkDTO(ch_ids[2], "Python is a good programming language and it is also interpreted", doc.id, 2),
+        ChunkDTO(
+            ch_ids[2],
+            "Python is a good programming language and it is also interpreted",
+            doc.id,
+            2,
+        ),
         ChunkDTO(ch_ids[3], "Water is blue and ocean has a lot of water", doc.id, 3),
-        ChunkDTO(ch_ids[4], "Dogs and cats live at home except sometimes they don't.", doc.id, 4),
+        ChunkDTO(
+            ch_ids[4],
+            "Dogs and cats live at home except sometimes they don't.",
+            doc.id,
+            4,
+        ),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
 
-    vectors = []    
+    vectors = []
     for i in range(5):
         embed = [0 for i in range(settings_session.embed_dim)]
         embed[i] = 1

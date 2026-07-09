@@ -8,6 +8,7 @@ from rag_app.services.retriever import RetrievalService
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from rag_app.chunkings.chunker import Chunker
 
+from rag_app.exceptions import LLMBadAnswer
 from tests.fakes import gemini_blocked, gemini_response
 
 
@@ -22,7 +23,7 @@ async def test_blocked_response_raises(make_llm_client):
     # A 200 with no usable candidate (safety block / empty) must surface as the legible
     # RuntimeError that LLMClient._extract_text re-raises, not the raw KeyError/IndexError.
     llm = make_llm_client(make_handler(gemini_blocked()))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(LLMBadAnswer):
         await llm.generate("...")
 
 
