@@ -45,7 +45,7 @@ class ChunkStore:
         self, session: AsyncSession, ids: Sequence[UUID]
     ) -> list[ChunkDTO]:
         # Text-fetch half of two-step retrieval. Order is not guaranteed here; the caller
-        # holds the (chunk_id, distance) ranking from VectorStore.search.
+        # holds the (chunk_id, distance) ranking from PgVectorStore.search.
         result = await session.execute(
             select(Chunk).where(Chunk.id.in_(ids)).order_by(Chunk.position)
         )

@@ -49,10 +49,11 @@
         Auth, streaming and reranking are deliberately out of scope for v1.
       </p>
       <p>
-        The architectural bit worth a look: all vector access goes through one
-        swappable vector-store interface, so the same app runs on pgvector or ChromaDB
-        by flipping a single config value — the store never embeds, it only stores and
-        searches vectors produced elsewhere.
+        The architectural bit worth a look: documents, chunks and vectors (via
+        pgvector) all live in one Postgres database, so ingesting or deleting a
+        document is a single atomic transaction — no orphaned chunks or vectors. The
+        vector store never embeds; it only stores and searches vectors produced
+        elsewhere.
       </p>
     </section>
 

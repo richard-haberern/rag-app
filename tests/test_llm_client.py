@@ -87,11 +87,11 @@ async def test_e2e(
 
     await doc_store.add_document(session, doc)
     await chunk_store.add_chunks(session, chunks)
-    # commit doc+chunks first: the store writes vectors on its own connection and the FK needs them visible.
-    await session.commit()
     await pg_vector_store.add_vectors(
-        [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
+        session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
     )
+    # commit so the retriever's own session sees the doc, chunks and vectors.
+    await session.commit()
 
     # threshold=2.0 (cosine-distance max) keeps the old no-threshold top-k behaviour these
     # ordering assertions were written against.

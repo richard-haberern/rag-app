@@ -2,7 +2,6 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from typing import Literal
 from pathlib import Path
 
 
@@ -25,15 +24,6 @@ class Settings(BaseSettings):
     # asyncpg SSL toggle. Off for local/CI/test Postgres (no TLS); Neon and other
     # managed Postgres require it, so the deploy env sets DB_SSL=true.
     db_ssl: bool = False
-
-    # ChromaDB settings
-    chroma_host: str = "localhost"
-    chroma_port: int = 8000
-    # How long the app/tests wait for the Chroma server to accept connections
-    # before giving up. The distroless chroma image ships no curl/wget/python, so a
-    # compose healthcheck is impossible; readiness is enforced app-side (connect()).
-    chroma_connect_retries: int = 30
-    chroma_connect_delay: float = 1.0  # seconds between attempts
 
     embed_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embed_dim: int = 384
@@ -58,8 +48,6 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-2.5-flash"
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/models"
     llm_timeout: float = 60.0
-
-    vector_db: Literal["ChromaDB", "Postgres"] = "ChromaDB"
 
     # Directory served at "/" by the static mount. Default resolves to the repo-root
     # static/ (works when run from the repo tree); Docker overrides via STATIC_DIR.

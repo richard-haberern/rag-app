@@ -169,12 +169,11 @@ async def test_vec_store_one_vector_roundtrip(
         ChunkDTO(ch_ids[5], "prs", doc.id, 5),
     ]
     await chunk_store.add_chunks(session, chunks)
-    # commit doc+chunks first: the store writes vectors on its own connection and the FK
-    # (Vector.chunk_id -> chunks.id) needs them already visible there.
+    # commit doc+chunks first so the FK (Vector.chunk_id -> chunks.id) is satisfied.
     await session.commit()
     vector = fake_embedder.embed_document([chunks[0].content])[0]
-    await vec_store.add_vector(ch_ids[0], vector)
-    ret_vector = await vec_store.get_vector_values_by_chunk_id(chunks[0].id)
+    await vec_store.add_vector(session, ch_ids[0], vector)
+    ret_vector = await vec_store.get_vector_values_by_chunk_id(session, chunks[0].id)
     assert vector == pytest.approx(ret_vector)
 
 
@@ -201,10 +200,14 @@ async def test_vec_store_vectors_roundtrip(
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
     vectors = fake_embedder.embed_document([ch.content for ch in chunks])
-    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    await vec_store.add_vectors(
+        session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
+    )
     ret_vectors = []
     for i, _ in enumerate(vectors):
-        ret_vectors.append(await vec_store.get_vector_values_by_chunk_id(chunks[i].id))
+        ret_vectors.append(
+            await vec_store.get_vector_values_by_chunk_id(session, chunks[i].id)
+        )
 
     for i, vec in enumerate(ret_vectors):
         for j, embed in enumerate(vec):
@@ -233,7 +236,7 @@ async def test_vec_store_wrong_dim(
     ]
     await chunk_store.add_chunks(session, chunks)
     with pytest.raises(ValueError):
-        await vec_store.add_vector(uuid4(), [0, 1, 2, 3])
+        await vec_store.add_vector(session, uuid4(), [0, 1, 2, 3])
 
 
 async def test_vec_store_get_values_by_chunk_id_eror(
@@ -259,9 +262,11 @@ async def test_vec_store_get_values_by_chunk_id_eror(
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
     vectors = fake_embedder.embed_document([ch.content for ch in chunks])
-    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    await vec_store.add_vectors(
+        session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
+    )
     with pytest.raises(VectorNotFound):
-        await vec_store.get_vector_values_by_chunk_id(uuid4())
+        await vec_store.get_vector_values_by_chunk_id(session, uuid4())
 
 
 async def test_vec_store_search(
@@ -298,12 +303,14 @@ async def test_vec_store_search(
         embed[i] = 1
         vectors.append(embed)
 
-    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    await vec_store.add_vectors(
+        session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
+    )
     query = [0 for i in range(settings_session.embed_dim)]
     query[0] = 1
     # threshold=2.0 (cosine-distance max) so nothing is filtered out — these assertions are about
     # ordering/ties, not threshold filtering.
-    found_k = await vec_store.search(query, 5, 2.0)
+    found_k = await vec_store.search(session, query, 5, 2.0)
     # Only the nearest (query == ch_ids[0]) is unambiguously ordered; ch_ids[1..4] all tie at
     # cosine_distance 1.0 (orthogonal basis vectors) and search has no secondary sort key, so
     # their relative order is not guaranteed. Assert the head exactly and the tied tail as a set.
@@ -319,7 +326,9 @@ async def test_vec_store_search(
 
 async def test_vec_store_search_bad_k(vec_store, session, db_tests, settings_session):
     with pytest.raises(ValueError):
-        await vec_store.search([0 for i in range(settings_session.embed_dim)], 0, 2.0)
+        await vec_store.search(
+            session, [0 for i in range(settings_session.embed_dim)], 0, 2.0
+        )
 
 
 async def test_vec_store_search_k_bigger_than_db_records(
@@ -355,10 +364,12 @@ async def test_vec_store_search_k_bigger_than_db_records(
         embed = [0 for i in range(settings_session.embed_dim)]
         embed[i] = 1
         vectors.append(embed)
-    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    await vec_store.add_vectors(
+        session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
+    )
     query = [0 for i in range(settings_session.embed_dim)]
     query[0] = 1
-    found_k = await vec_store.search(query, 10, 2.0)
+    found_k = await vec_store.search(session, query, 10, 2.0)
 
     # Only 5 vectors exist, so k=10 returns 5. Same tie caveat as test_pgvec_store_search: the head
     # is deterministic, the four distance-1.0 results are not ordered among themselves.
@@ -399,7 +410,7 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
     vec = fake_embedder.embed_document([chunks[0].content])[0]
-    await pg_vector_store.add_vector(ch_ids[0], vec)
+    await pg_vector_store.add_vector(session, ch_ids[0], vec)
 
     await doc_store.remove_document(session, doc.id)
     await session.commit()
@@ -407,8 +418,11 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     async with new_session() as s2:
         with pytest.raises(ChunkNotFound):
             await chunk_store.get_chunks_by_document(s2, doc.id)
-    with pytest.raises(VectorNotFound):
-        await pg_vector_store.get_vector_values_by_chunk_id(ch_ids[0])
+    # Fresh session so the read hits the DB (with expire_on_commit=False the original
+    # session would return the cascade-deleted vector from its identity map).
+    async with new_session() as s3:
+        with pytest.raises(VectorNotFound):
+            await pg_vector_store.get_vector_values_by_chunk_id(s3, ch_ids[0])
 
 
 async def test_vector_store_threshold(
@@ -454,7 +468,9 @@ async def test_vector_store_threshold(
         embed = [0 for i in range(settings_session.embed_dim)]
         embed[i] = 1
         vectors.append(embed)
-    await vec_store.add_vectors([(ch_ids[i], vec) for i, vec in enumerate(vectors)])
+    await vec_store.add_vectors(
+        session, [(ch_ids[i], vec) for i, vec in enumerate(vectors)]
+    )
 
     query = [0 for i in range(settings_session.embed_dim)]
     query[0] = 8
@@ -462,6 +478,6 @@ async def test_vector_store_threshold(
     query[2] = 3
     query[3] = 1
     query[4] = 1
-    res = await vec_store.search(query, 5, 0.6)
+    res = await vec_store.search(session, query, 5, 0.6)
     for _, res_dist in res:
         assert res_dist <= 0.6

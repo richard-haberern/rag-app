@@ -9,35 +9,24 @@ from rag_app.models.vector import Vector
 
 
 async def init_db(engine: AsyncEngine) -> None:
-    """Create the relational schema: the documents and chunks tables.
+    """Create the whole schema: the pgvector extension and the documents, chunks and
+    vectors tables. Everything lives in one Postgres datastore now.
 
-    These always live in Postgres regardless of the vector backend. The pgvector extension
-    and the vectors table are Postgres-vector-backend-only and created by init_pgvector.
-    Alembic migrations are deferred (see DECISIONS.md); this is the MVP bootstrap.
+    CREATE EXTENSION requires sufficient DB privileges (fine in the local container; a
+    deployment-time concern once it leaves it). Alembic migrations are deferred (see
+    DECISIONS.md); this is the MVP bootstrap - idempotent, safe per boot.
     """
     # .begin() instead of .connect() - creates the transaction - auto commits / rollback at the end
     # create_all has to be sync
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(
             Base.metadata.create_all,
             tables=[
                 Base.metadata.tables[Document.__tablename__],
                 Base.metadata.tables[Chunk.__tablename__],
+                Base.metadata.tables[Vector.__tablename__],
             ],
-        )
-
-
-async def init_pgvector(engine: AsyncEngine) -> None:
-    """Create the pgvector extension + the stored_vectors table. Postgres-backend only.
-
-    CREATE EXTENSION requires sufficient DB privileges. Called only when Postgres is the
-    chosen vector store; in Chroma mode neither the extension nor the table is touched.
-    """
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(
-            Base.metadata.create_all,
-            tables=[Base.metadata.tables[Vector.__tablename__]],
         )
 
 

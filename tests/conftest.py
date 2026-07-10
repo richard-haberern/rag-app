@@ -1,5 +1,3 @@
-from uuid import uuid4
-
 import pytest
 from rag_app.db.engine import make_engine, make_sessionmaker
 from sqlalchemy import text
@@ -7,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rag_app.db.base import Base
 from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
-from rag_app.stores.chroma_vector_store import ChromaVectorStore, connect
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.config import Settings
 from tests.fakes import FakeTokenizer, FakeEmbedder, make_mock_llm_client
@@ -53,53 +50,16 @@ def chunk_store():
     return ChunkStore()
 
 
-@pytest.fixture(params=["pg", "chroma"])
-def vec_store(request, session_maker, chroma_collection):
-    if request.param == "pg":
-        return PgVectorStore(session_maker)
-    elif request.param == "chroma":
-        return ChromaVectorStore(chroma_collection)
+# The vector store is now stateless: it takes a caller-owned session per method,
+# so no session_maker is needed to construct it.
+@pytest.fixture
+def vec_store():
+    return PgVectorStore()
 
 
 @pytest.fixture
-def pg_vector_store(session_maker):
-    return PgVectorStore(session_maker)
-
-
-@pytest.fixture
-def chroma_vector_store(chroma_collection):
-    return ChromaVectorStore(chroma_collection)
-
-
-# --- Chroma fixtures (real server via the docker-compose `chroma` service) ------
-# Skips the dependent tests when the server is unreachable, rather than erroring,
-# so the suite still runs without Chroma up.
-@pytest.fixture(scope="session")
-async def chroma_client(settings_session):
-    # connect() retries for the full configured budget before raising, so a
-    # skip here means the server never came up (not a transient startup race).
-    try:
-        client = await connect()
-    except Exception as exc:
-        pytest.skip(
-            f"Chroma server unreachable at "
-            f"{settings_session.chroma_host}:{settings_session.chroma_port}: {exc}"
-        )
-    return client
-
-
-# Function-scoped, unique-named collection: Chroma has no per-test TRUNCATE like the
-# PG `truncate` fixture, so each test gets a fresh collection that is dropped on teardown.
-@pytest.fixture
-async def chroma_collection(chroma_client):
-    name = f"test_{uuid4().hex}"
-    collection = await chroma_client.get_or_create_collection(
-        name=name,
-        embedding_function=None,
-        configuration={"hnsw": {"space": "cosine"}},
-    )
-    yield collection
-    await chroma_client.delete_collection(name=name)
+def pg_vector_store():
+    return PgVectorStore()
 
 
 @pytest.fixture(scope="session")

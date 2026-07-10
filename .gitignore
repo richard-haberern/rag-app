@@ -11,8 +11,7 @@ venv/
 build/
 dist/
 
-# local vector store / db data
-chroma_data/
+# local db data
 *.sqlite3
 
 # editor / os

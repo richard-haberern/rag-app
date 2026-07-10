@@ -9,7 +9,7 @@ from rag_app.embeddings.embedder import Embedder
 from rag_app.schemas import ChunkDTO, DocumentDTO
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.stores.document_store import DocStore
-from rag_app.stores.vector_store import VectorStore
+from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import DocumentExists, EmptyDocument
 
 
@@ -19,7 +19,7 @@ class IngestionService:
         self,
         doc_store: DocStore,
         chunk_store: ChunkStore,
-        vector_store: VectorStore,
+        vector_store: PgVectorStore,
         embedder: Embedder,
         chunker: Chunker,
         session_factory: async_sessionmaker[AsyncSession],
@@ -44,32 +44,33 @@ class IngestionService:
             ChunkDTO(uuid4(), ch, document.id, position)
             for position, ch in enumerate(chunks)
         ]
-        # create vectors - here just list of str
+        # create vectors - here just list of str. Embedding is done outside the write
+        # transaction below - it's slow CPU work and shouldn't hold a transaction open.
         vectors = self.embedder.embed_document(chunks)
-        # auto-commits / rollback - atomic transaction. The exists() pre-check above handles the
-        # common case; this guards the TOCTOU race where two identical uploads both pass it.
-        # content_hash is the only unique constraint a fresh-uuid insert can violate here.
+        # Single atomic transaction: document, chunks and vectors all live in Postgres now,
+        # so they commit or roll back together - no orphan-vector window. The exists()
+        # pre-check above handles the common case; the IntegrityError guard covers the
+        # TOCTOU race where two identical uploads both pass it (content_hash is the only
+        # unique constraint a fresh-uuid insert can violate here). The unit-of-work orders
+        # the inserts by FK dependency, so the chunks land before their vectors.
         try:
             async with self._session_factory.begin() as session:
                 await self.doc_store.add_document(session, document)
                 await self.chunk_store.add_chunks(session, chunk_dtos)
+                await self.vec_store.add_vectors(
+                    session,
+                    [
+                        (ch.id, vector)
+                        for ch, vector in zip(chunk_dtos, vectors, strict=True)
+                    ],
+                )
         except IntegrityError as exc:
             raise DocumentExists() from exc
 
-        await self.vec_store.add_vectors(
-            [(ch.id, vector) for ch, vector in zip(chunk_dtos, vectors, strict=True)],
-        )
-
     async def remove_document(self, doc_id: UUID) -> None:
-        # Read chunk ids before deleting: the pg cascade removes chunks, but an external
-        # vector store (Chroma) still needs them to purge its vectors.
-        async with self._session_factory.begin() as session:
-            ch_ids = await self.chunk_store.get_chunk_ids_by_document(session, doc_id)
-        # Delete the vectors first so we don't run into a orphan vectors stage.
-        # Deletes the vectors in both stores
-        await self.vec_store.remove_vectors(ch_ids)
-        # This will delete the docs and chunks with DELETE ON CASCADE
-        # the vectors are already deleted
-        # if we use PGvector 3 transactions but that is necessary for the swappable seam
+        # Single atomic transaction. Deleting the document cascades to its chunks and, in
+        # turn, their vectors via the FK ON DELETE CASCADE chain
+        # (stored_vectors -> stored_chunks -> stored_documents), so one delete purges
+        # everything with no orphans.
         async with self._session_factory.begin() as session:
             await self.doc_store.remove_document(session, doc_id)

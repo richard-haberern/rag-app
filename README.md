@@ -11,8 +11,9 @@ limiting are explicitly out of scope for this version.
  
 ## Highlights
  
-- **Swappable vector-store seam** — all vector access goes through one interface, so
-  migrating from pgvector to a dedicated vector DB is a bounded task, not a rewrite.
+- **Atomic ingest & delete** — documents, chunks and vectors live in one Postgres DB,
+  so a store or a delete is a single transaction: it fully happens or fully rolls back,
+  with no orphaned chunks or vectors.
 - **Layered store/service architecture** — persistence and business logic are
   separated, and ORM objects never escape the store layer (converted to DTOs at the
   boundary), so the app depends on plain data, not live session state.
@@ -23,15 +24,16 @@ limiting are explicitly out of scope for this version.
 
 ## Architecture
 
-The core design choice is a **swappable vector-store seam**: all vector access goes
-through one interface, so the RAG logic never touches pgvector directly. Migrating
-to a dedicated vector DB (ChromaDB) later is a bounded task behind that seam, not a
-rewrite.
+The core design choice is a **single Postgres datastore**: documents, chunks and
+vectors (via pgvector) all live in one database. That's what makes ingest and delete
+**atomic** — a service opens one transaction and writes (or deletes) all three
+together, so there is no window in which chunks exist without their vectors, or vice
+versa.
 
 The codebase is split into two layers:
 
-- **Stores** (`DocStore`, `ChunkStore`, `VectorStore`) — own persistence only. They
-  receive a session as an argument; they do not own or open it.
+- **Stores** (`DocStore`, `ChunkStore`, `PgVectorStore`) — own persistence only. Each
+  is stateless and receives a session as an argument; it does not own or open it.
 - **Services** (`IngestionService`, `RetrievalService`, `QueryService`) — own the
   business logic and orchestrate stores within a transaction.
 
@@ -43,8 +45,8 @@ flowchart LR
     subgraph Ingest
         A[Document] --> B[Chunk]
         B --> C[Embed locally]
-        C --> D[(Postgres DB for docs and chunks)]
-        C --> E[(Vector store — ChromaDB default, or Postgres pgvector)]
+        C --> D[(Postgres: docs + chunks)]
+        C --> E[(Postgres: pgvector)]
     end
     subgraph Query
         Q[Query] --> R[Embed locally]
@@ -54,11 +56,11 @@ flowchart LR
         U --> V[Answer]
     end
     D -. Store orchestration .-> S
-    E -. swappable VectorStore interface .-> S
+    E -. vector search .-> S
 ```
 <!-- FLAG: this diagram is my reconstruction of your flow from our past work.
-     Check the ingest write order and whether retrieval reads from pgvector
-     directly or always through the VectorStore interface (it should be the latter). -->
+     Check the ingest write order (docs + chunks + vectors now commit in one
+     transaction) and that retrieval reads through PgVectorStore.search. -->
 
 **Notable decisions** (full rationale in [`DECISIONS.md`](./DECISIONS.md)):
 
@@ -103,14 +105,9 @@ POSTGRES_PASSWORD=change-me
 LLM_API_KEY=your-gemini-api-key   # required — generation calls Gemini
 EOF
 
-# 2. Build and start the stack (db + api)
+# 2. Build and start the stack (Postgres + api)
 docker compose up --build
 ```
-
-> 🔀 **Vector backend.** Defaults to ChromaDB. To use Postgres/pgvector instead, start with
-> `VECTOR_DB=Postgres docker compose up --build` (or set `VECTOR_DB` in `.env`). The setting is
-> passed into the api container by compose — the container does not read `.env` directly — so
-> switching backends needs a container recreate, and bootstrap changes need `--build`.
 
 > ⏳ **First build/run is slow.** The api image installs **PyTorch** (~a few GB), and
 > on first startup the embedding model is downloaded. Expect several minutes the first
@@ -122,9 +119,8 @@ Once it's up:
 - 🧪 Live demo (ingest → retrieve → answer) → <http://localhost:8000/demo.html>
 - 📖 Interactive docs (Swagger) → <http://localhost:8000/docs>
 
-The database schema is created automatically on startup: the documents and chunks tables
-always, plus the pgvector extension and vectors table only when the Postgres vector backend is
-selected (`VECTOR_DB=Postgres`). The default backend is ChromaDB.
+The database schema is created automatically on startup: the pgvector extension and the
+documents, chunks and vectors tables.
 
 ### Run locally (without Docker)
 
@@ -206,9 +202,8 @@ The test design is deliberate:
 ## Status & roadmap
 
 - **v1 MVP — complete.** Ingest → chunk → embed → store → retrieve → prompt → answer,
-  end-to-end, with a passing test suite.
-- **Next:** ChromaDB migration behind the existing vector-store seam (the planned
-  adaptability demonstration), then deployment.
+  end-to-end, with atomic store/delete and a passing test suite.
+- **Next:** deployment (single service against a managed Postgres with pgvector).
 - **Deferred by design:** auth, reranking, streaming, multiple collections, migration
   tooling (Alembic), observability, rate limiting.
 

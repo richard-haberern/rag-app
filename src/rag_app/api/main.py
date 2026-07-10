@@ -8,7 +8,7 @@ from httpx import AsyncClient
 
 from rag_app.api.routes import ingest, query, dev
 from rag_app.chunkings.factory import build_chunker
-from rag_app.db.bootstrap import init_db, init_pgvector
+from rag_app.db.bootstrap import init_db
 from rag_app.db.engine import make_engine, make_sessionmaker
 from rag_app.embeddings.embedder import Embedder
 from rag_app.llm.factory import build_llm_client
@@ -17,11 +17,6 @@ from rag_app.services.ingestor import IngestionService
 from rag_app.services.retriever import RetrievalService
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.stores.document_store import DocStore
-from rag_app.stores.chroma_vector_store import (
-    ChromaVectorStore,
-    connect,
-    make_collection,
-)
 from rag_app.config import get_settings
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import AppError
@@ -32,7 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = make_engine()
     await init_db(
         app.state.engine
-    )  # create Chunk and Document tables; idempotent, safe per boot
+    )  # pgvector extension + Document/Chunk/Vector tables; idempotent, safe per boot
     app.state.session_maker = make_sessionmaker(app.state.engine)
     app.state.http = AsyncClient()
     app.state.embedder = Embedder()
@@ -40,14 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm_client = build_llm_client(app.state.http)
     app.state.chunk_store = ChunkStore()
     app.state.doc_store = DocStore()
-    if get_settings().vector_db == "ChromaDB":
-        app.state.client = await connect()  # blocks until the Chroma server is ready
-        app.state.vec_store = ChromaVectorStore(await make_collection(app.state.client))
-    elif get_settings().vector_db == "Postgres":
-        await init_pgvector(
-            app.state.engine
-        )  # extension + vectors table, PG-backend only
-        app.state.vec_store = PgVectorStore(app.state.session_maker)
+    app.state.vec_store = PgVectorStore()
     app.state.ingestor = IngestionService(
         app.state.doc_store,
         app.state.chunk_store,
@@ -70,7 +58,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await app.state.engine.dispose()
     await app.state.http.aclose()
-    # client has no close / aclose method - AsyncClient shouldn't leak
 
 
 app = FastAPI(

@@ -68,7 +68,7 @@ async def test_store_document_persists_doc_chunks_vectors(
         ret_doc = await doc_store.get_document(s, doc.id)
         chunks = await chunk_store.get_chunks_by_document(s, doc.id)
         vectors = [
-            await vec_store.get_vector_values_by_chunk_id(ch.id) for ch in chunks
+            await vec_store.get_vector_values_by_chunk_id(s, ch.id) for ch in chunks
         ]
 
     assert ret_doc.id == doc.id
@@ -156,9 +156,9 @@ async def test_remove_document(
         await retriever.get_document(doc.id)
     async with new_session() as s:
         assert await chunk_store.get_chunks_by_ids(s, ch_ids) == []
-    for ch_id in ch_ids:
-        with pytest.raises(VectorNotFound):
-            await vec_store.get_vector_values_by_chunk_id(ch_id)
+        for ch_id in ch_ids:
+            with pytest.raises(VectorNotFound):
+                await vec_store.get_vector_values_by_chunk_id(s, ch_id)
 
 
 async def test_get_stored_documents_ids(

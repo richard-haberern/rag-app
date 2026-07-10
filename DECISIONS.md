@@ -18,10 +18,16 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **PostgreSQL + SQLAlchemy (async) + asyncpg.**
 
-**pgvector first, ChromaDB migration.**
-- pgvector keeps the first MVP simple (vectors live in the same DB as chunks).
-- Building the infrastructure so it migrates cleanly to ChromaDB is a valuable
-  skill in its own right.
+**pgvector only — ChromaDB dropped.**
+- Vectors live in the same Postgres DB as documents and chunks, so a store or a
+  delete is a **single atomic transaction** (see "Atomic writes & deletes" below).
+  This is the decisive reason: a second, external vector store makes cross-store
+  atomicity impossible and leaves orphan-vector / orphan-chunk windows.
+- Chroma was originally kept to demonstrate a swappable seam (pgvector now → Chroma
+  later). Dropped: it is a second deployed service with no free tier — dead weight —
+  and the swappable seam is incompatible with the atomicity we actually want (sharing
+  one pg transaction couples the store to a SQLAlchemy session anyway). One datastore,
+  one deployed service.
 
 **Local embeddings via sentence-transformers.**
 - The workload doesn't need heavy compute.
@@ -33,18 +39,21 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 ## Data Model & Persistence
 
-**No cross-store atomicity; orphan chunks accepted, orphan vectors not.**
-- Atomicity across Postgres and the vector store is impossible with the migration to Chroma
-- Write order is **chunks first, then vectors**. This can leave orphan chunks
-  (chunk with no vector); that is a documented, accepted problem for v1 and will
-  be resolved later. Orphan *vectors* are prevented by the store orchestration.
+**Atomic writes & deletes — no orphans.**
+- Document, chunks and vectors all live in one Postgres DB, so a store writes them in
+  a **single transaction** (`IngestionService.store_document`): they commit together
+  or roll back together. No orphan-vector window.
+- A delete is one `session.delete(document)` in a single transaction: the FK chain
+  `stored_vectors → stored_chunks → stored_documents` (all `ON DELETE CASCADE`)
+  removes chunks and their vectors in the same statement. No orphan chunks.
+- This closes the orphan problem the earlier two-store design could only defer.
 
 **`chunk_id` is code-generated, not a DB `SERIAL`.**
-- The id exists before any I/O, so it does not force the write ordering
-  (chunk-then-vector).
+- The id exists before any I/O, so the vector rows can be built and inserted in the
+  same transaction as their chunks without a round-trip to read generated ids.
 
 **Two-step retrieval.**
-- The vector store holds only `(chunk_id, vector)` — Chroma-shaped.
+- The vectors table holds only `(chunk_id, vector)`.
 - Retrieval is `search → chunk_ids → fetch text`.
 
 **DTOs cross the boundary, never ORM objects.**
@@ -52,7 +61,9 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Stores accept/return DTOs (`DocumentDTO`, `ChunkDTO`) / primitives; the extra
   ORM→DTO mapping is the accepted cost.
 
-**Separate `chunk_store`, `doc_store`, `vector_store` (vector store swappable).**
+**Separate `chunk_store`, `doc_store`, `vector_store`.**
+- Three thin, single-responsibility stores; all are stateless and take a caller-owned
+  `session` (the service layer owns the transaction — see below).
 - Chunk mapping keeps a `position`, which improves LLM generation when the top-k
   chunks are retrieved.
 - `Chunk`: `position` (int) + `UniqueConstraint(document_id, position)`.
@@ -61,9 +72,9 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Matches the `(chunk_id, vector)` shape; one vector per chunk.
 
 **`stored_vectors` keeps an FK → `stored_chunks(chunk_id)` `ON DELETE CASCADE`.**
-- Buys referential integrity + cascade deletes (not the `search()` return shape).
-- NOTE: this FK is **pgvector-only** — it couples the store to Postgres and will
-  **not** carry over to a ChromaDB store.
+- Buys referential integrity + cascade deletes. This FK is the **mechanism** behind
+  atomic deletes: deleting a document cascades to chunks and then to their vectors in
+  one DB operation, so the service never has to purge vectors itself.
 
 **`doc_metadata` is a JSONB column, dict `str → Any`; keys must be `str`.**
 - ORM attribute is `doc_metadata` because `metadata` is reserved by SQLAlchemy's
@@ -86,8 +97,10 @@ deferred is intentionally out of scope for v1 — see the final section.
   `sslmode` URL query param.
 
 **Services own the session makers and the transaction boundaries.**
-- Sessions are passed into the store methods: we gain write atomicity while
-  keeping the vector store seam swappable.
+- Every store — including the vector store — is stateless and takes the session as an
+  argument. A service opens one transaction and passes that session to `doc_store`,
+  `chunk_store` and `vector_store` together, which is what makes a store or a delete
+  atomic.
 - Cost: a little overhead on reads and extra plumbing (services must begin/end
   sessions).
 
@@ -95,9 +108,11 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Two documents are duplicates if their content is identical; the hash is stored.
 - Non-character documents are rejected.
 
-**No self-heal — dedup is preferred over self-heal.**
-- If a document + chunks are stored but the vectors are not, we cannot re-store to
-  fill the vectors, because dedup rejects the second attempt.
+**No self-heal needed — the atomic write removes the failure mode.**
+- The "document + chunks stored but vectors missing" state can no longer occur: all
+  three are written in one transaction, so a failure rolls the whole thing back and
+  the document simply isn't stored. Dedup by content hash then lets the client retry
+  cleanly.
 
 **Ingest takes content from the request body (path → content redesign).**
 - Documents are sent as `content` in the request body; the service no longer reads
@@ -125,22 +140,24 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 ---
 
-## Vector Store Seam
+## Vector Store
 
-**All vector access goes through a single swappable interface.**
+**No abstraction seam — one concrete `PgVectorStore`.**
+- The swappable `VectorStore` Protocol was dropped along with Chroma. It only existed
+  to make room for a second backend, and sharing the pg transaction for atomicity
+  couples the store to a SQLAlchemy session anyway, so an "any backend" seam would be
+  dishonest. `PgVectorStore` is a plain store like `DocStore`/`ChunkStore`.
 
-**Seam is currently a Protocol, not an ABC inheritance hierarchy.**
-
-**The current seam is concrete, compatible-shaped classes — a formal, abstract
-`VectorStore` / `Embedder` Protocol is deferred.**
-- The `chunk_vectors → chunks` FK is pgvector-only and won't port to Chroma.
-
-**Chroma is a first-class dependency.**
-- Without a connection to ChromaDB the app won't start.
+**`PgVectorStore` is stateless; each method takes a `session`.**
+- Reads (`search`, `get_vector_values_by_chunk_id`) and writes (`add_vectors`,
+  `remove_vectors`) all run on the caller's session, so writes join the same
+  transaction as the doc/chunk writes.
 
 **Search takes a similarity threshold.**
 
-**Chroma vector store searches ANN and doesn't have a secondary ordering rule which can lead to different found vectors than Postgres (pgvector) that does linear seach and has a deterministic search with ChunkID**
+**Search is a deterministic exact (linear) scan.**
+- pgvector orders by cosine distance with `chunk_id` as a secondary key, so results
+  are stable and ties break deterministically. (No HNSW/IVFFlat index at MVP scale.)
 
 ---
 
@@ -149,17 +166,16 @@ deferred is intentionally out of scope for v1 — see the final section.
 **Ingestion / store orchestrator.**
 - On insert, the embedder blocks the whole event loop; accepted for v1.
 - Deferred: move embedding off the loop with `asyncio.to_thread`.
-- **Document removal** goes through `VectorStore.remove_vectors` explicitly rather than
-  relying on the pg cascade: deleting a `Document` cascades to chunks and the pg
-  `stored_vectors` table, but that cascade never reaches an external store (Chroma), so
-  the service must purge it via the interface.
-- Ordering mirrors `store_document`: delete the pg document first (authoritative), then
-  purge the external vectors. A Chroma-purge failure therefore leaves orphan vectors
-  whose chunk ids no longer resolve — symmetric with the store path's "vectors added
-  after commit" window. See Deferred #3 (orphan chunks/vectors accepted, no reconciler).
-- Chunk ids are read *before* the delete (the cascade removes chunks) via the new
-  `ChunkStore.get_chunk_ids_by_document`, which returns `[]` for a document with no
-  chunks instead of raising like `get_chunks_by_document` (empty is a valid delete state).
+- Embedding runs **outside** the write transaction (it's slow CPU work; don't hold a
+  transaction open for it). The document, chunks and vectors are then written in one
+  `begin()` block. The unit-of-work orders the inserts by FK dependency, so chunks land
+  before their vectors within the single flush.
+- **Document removal** is one transaction: `session.delete(document)` and let the FK
+  `ON DELETE CASCADE` chain remove chunks and their vectors. No pre-read of chunk ids,
+  no explicit vector purge — the DB does it atomically.
+- `ChunkStore.get_chunk_ids_by_document` is now unused by the removal path (kept for its
+  own test / potential reuse; it returns `[]` for a document with no chunks rather than
+  raising like `get_chunks_by_document`).
 
 **Retrieval.**
 - Deferred: cross-encoder re-ranking of the top-k.
@@ -238,16 +254,13 @@ deferred is intentionally out of scope for v1 — see the final section.
   `static/` dir would exist locally but not in the container.
 - The frontend uses relative fetch URLs (same origin), so no CORS middleware is needed.
 
-**Schema bootstrap is split by vector backend.**
-- `init_db()` creates only the always-present relational schema: the documents and chunks
-  tables. These live in Postgres regardless of the chosen vector store.
-- `init_pgvector()` creates the pgvector extension + the `stored_vectors` table, and runs
-  **only** when `VECTOR_DB=Postgres`. In Chroma mode neither the extension nor the vectors
-  table is ever created.
-- `init.sql` (the container's fresh-volume init) no longer creates the extension — it only
-  creates the isolated `rag_test` database. Consumers that need the extension create it
-  themselves: the app via `init_pgvector` (Postgres mode), the test suite via its
-  `setup_schema` fixture.
+**Schema bootstrap is one unified step.**
+- `init_db()` creates everything: the pgvector extension and the documents, chunks and
+  vectors tables. It runs on every boot (idempotent). There is no longer a per-backend
+  split.
+- `init.sql` (the container's fresh-volume init) only creates the isolated `rag_test`
+  database; it does not create the extension. Consumers that need the extension create
+  it themselves: the app via `init_db`, the test suite via its `setup_schema` fixture.
 - `create_all` only creates missing tables; it never `ALTER`s an existing one, so
   a model change silently leaves the live table on the old schema.
 - Dev workaround: drop and recreate.
@@ -259,37 +272,26 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Set the `LLM_API_KEY` env var to enable generation.
 - Distribution model is "clone + build".
 - The DB bootstrap lives in the API lifespan for v1; with Alembic it will move out.
-- **Vector backend selection in the container.** `.env` is `.dockerignore`'d, so the app never
-  reads it inside the image; the choice is passed explicitly via compose
-  (`api.environment: VECTOR_DB: ${VECTOR_DB:-ChromaDB}`), substituted from the host env / project
-  `.env` at `up` time. Consequence: changing the backend needs a container recreate (not a code
-  rebuild), and a stale image will still run its own baked bootstrap — rebuild (`--build`) after
-  bootstrap changes.
+- Compose is now two services — `pg` (pgvector) and `api`. A stale image still runs its
+  own baked bootstrap, so rebuild (`--build`) after bootstrap changes.
 
 ---
 
 ## Testing & CI
 
-**Chroma test suite.**
-- Each test gets an independent collection, torn down after use.
-- Runs against an actual Docker DB — Chroma's in-memory client is synchronous only,
-  which is unusable for this project.
-- Port split: the API's fixed mapping is `8080:8000`, so the test-suite Chroma can
-  keep the default port `8000` unchanged.
-- The Chroma image has no `curl`/`wget`/`python`, so a Docker Compose healthcheck
-  isn't possible; the healthcheck is done app-side, in both the app and the tests.
-- `AsyncHttpClient.make_client()` performs the DB connection check eagerly (tested),
-  not lazily — that's why we retry client *creation*, not just the connect.
+**Vector-store tests run once, against Postgres.**
+- With Chroma gone the `vec_store` fixture is no longer parametrized over two backends;
+  the interface tests exercise `PgVectorStore` directly. Because the store is stateless,
+  the fixture just constructs `PgVectorStore()` and each test passes its own session.
 
 **Postgres test database.**
 - Tests run against the Compose Postgres (`test` profile) in an isolated `rag_test`
-  DB as `raguser`; Postgres now publishes host port `5432`.
+  DB as `raguser`; Postgres publishes host port `5432`.
 - Test-DB creds couple `DB_PASSWORD_TEST` to `POSTGRES_PASSWORD` (same role).
 
 **CI.**
-- Uses a single `compose up` file instead of GitHub services, because Chroma has to
-  be in a compose file and we keep everything unified — both go through the compose
-  file.
+- Uses a single `compose up` (`test` profile) to stand up Postgres, then runs
+  host-side pytest against it.
 - Uses a committed `.env.ci` file with test credentials against a test DB.
 
 ---
@@ -300,8 +302,9 @@ deferred is intentionally out of scope for v1 — see the final section.
    `ALTER`s an existing one, so a model change silently leaves the live table on the
    old schema. Dev workaround is drop + recreate.
 2. **Cross-encoder reranking of top-k.** v1 is bi-encoder retrieval only.
-3. **Orphan chunks — accepted.** No reconciliation / cleanup job. Orphan vectors are
-   prevented in the store orchestration.
+3. ~~**Orphan chunks — accepted.**~~ Resolved: store and delete are now single atomic
+   transactions in one Postgres DB, so neither orphan chunks nor orphan vectors occur
+   (see "Atomic writes & deletes"). No reconciler needed.
 4. **Move embedding off the event loop** (`asyncio.to_thread`).
 5. **Dependency pinning.** `pyproject.toml` currently uses lower-bound `>=`
    constraints, so a future package change could break us. Pin with a lockfile later.

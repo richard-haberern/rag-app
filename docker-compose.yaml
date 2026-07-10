@@ -18,42 +18,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # Vector store. Tag pinned to match the installed chromadb client (1.5.9).
-  # In both profiles: the `app` stack needs a vector store (api depends_on it), and the
-  # `test` stack needs it for host-run pytest. Publishes host port 8000 for pytest, which
-  # reaches it at CHROMA_HOST:CHROMA_PORT (default localhost:8000). `api` publishes host
-  # 8080 (not 8000) to avoid colliding with this; inside the network api reaches Chroma at
-  # chroma:8000.
-  #
-  # No healthcheck: the chromadb/chroma image is distroless (no curl/wget/python), so a
-  # container healthcheck is impossible. Readiness is enforced app-side by connect()
-  # (chroma_vector_store.py), which the FastAPI lifespan and the test fixture both call.
-  # Any consumer using `depends_on: chroma` must rely on the default `service_started` —
-  # NOT `condition: service_healthy`, which would hang forever with no healthcheck.
-  chroma:
-    image: chromadb/chroma:1.5.9
-    profiles: ["app", "test"]
-    ports:
-      - "8000:8000"
-
   api:
     build: .
     profiles: ["app"]
     depends_on:
       pg:
         condition: service_healthy   # api won't start until pg_isready passes
-      chroma:
-        condition: service_started
     environment:
       # host is `pg` (the compose service name), not localhost.
       DATABASE_URL: postgresql+asyncpg://raguser:${POSTGRES_PASSWORD:-}@pg:5432/ragdb
-      CHROMA_HOST: chroma
-      CHROMA_PORT: 8000
       LLM_API_KEY: ${LLM_API_KEY:-}
-      # Vector backend selector. .env is .dockerignore'd so the app never reads it inside the
-      # container; the choice must be passed in here. Substituted from the host env / project
-      # .env at `up` time; defaults to ChromaDB. Set VECTOR_DB=Postgres to use pgvector.
-      VECTOR_DB: ${VECTOR_DB:-ChromaDB}
     ports:
       - "8080:8000"
 
