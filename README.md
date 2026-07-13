@@ -76,8 +76,11 @@ flowchart LR
   gate, top-k is a ceiling.
 - **Session-per-method**: stores take a session as an argument rather than owning one,
   keeping transaction boundaries in the service layer.
-- **No Alembic in v1** — schema changes are drop-and-recreate. Migration discipline is
-  a deferred phase.
+- **Alembic-managed schema** — the schema (with row-level-security multi-tenancy) lives
+  in a single initial migration; because there's no real data yet, the DB is **reset from
+  scratch** rather than mutated, and no destructive op ever lives inside a migration.
+  Wiring the running app onto migrations + the least-privilege `app_user` role is in
+  progress (see DECISIONS.md → *Migrations & Multi-tenancy*).
 
 ---
 
@@ -102,6 +105,7 @@ flowchart LR
 # 1. Create a .env (compose auto-loads it)
 cat > .env <<'EOF'
 POSTGRES_PASSWORD=change-me
+APP_USER_PASSWORD=change-me-too   # least-privilege RLS role, created on a fresh volume
 LLM_API_KEY=your-gemini-api-key   # required — generation calls Gemini
 EOF
 
@@ -121,6 +125,12 @@ Once it's up:
 
 The database schema is created automatically on startup: the pgvector extension and the
 documents, chunks and vectors tables.
+
+> **Migrations & multi-tenancy.** The RLS-enabled schema is defined by an Alembic
+> migration (`alembic upgrade head`); a fresh volume auto-provisions the `app_user` role
+> via `init-app-user.sh`. To reset from scratch (safe — no real data): local
+> `docker compose down -v` then re-run the migration; on prod/Neon create `app_user` once
+> via the console, then `alembic upgrade head`. Never truncate/backfill inside a migration.
 
 ### Run locally (without Docker)
 
@@ -204,8 +214,10 @@ The test design is deliberate:
 - **v1 MVP — complete.** Ingest → chunk → embed → store → retrieve → prompt → answer,
   end-to-end, with atomic store/delete and a passing test suite.
 - **Next:** deployment (single service against a managed Postgres with pgvector).
-- **Deferred by design:** auth, reranking, streaming, multiple collections, migration
-  tooling (Alembic), observability, rate limiting.
+- **In progress:** row-level multi-tenancy (Postgres RLS + `app_user`) and wiring the app
+  onto Alembic migrations. Real tenant isolation is blocked on **auth** (see below).
+- **Deferred by design:** auth, reranking, streaming, multiple collections, observability,
+  rate limiting.
 
 ---
 

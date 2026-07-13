@@ -266,7 +266,9 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Dev workaround: drop and recreate.
 - `CREATE EXTENSION` needs a privileged role — fine in the local container, but a
   deployment-time concern once it leaves the container.
-- Alembic deferred.
+- Alembic is **now adopted** for the schema — see *Migrations & Multi-tenancy* below. The
+  `create_all` bootstrap above still backs the test suite (switching it to migrations is the
+  remaining gap).
 
 **Docker / distribution.**
 - Set the `LLM_API_KEY` env var to enable generation.
@@ -274,6 +276,61 @@ deferred is intentionally out of scope for v1 — see the final section.
 - The DB bootstrap lives in the API lifespan for v1; with Alembic it will move out.
 - Compose is now two services — `pg` (pgvector) and `api`. A stale image still runs its
   own baked bootstrap, so rebuild (`--build`) after bootstrap changes.
+
+---
+
+## Migrations & Multi-tenancy (RLS)
+
+**Alembic adopted (async, pyproject config).**
+- Alembic 1.18 with the pyproject layout: operational config in `[tool.alembic]`
+  (`pyproject.toml`); `alembic.ini` holds only logging. `env.py` is the async template,
+  injecting `sqlalchemy.url` from Settings with `Base.metadata` as target.
+- Migrations/admin connect as the owner `raguser`; the runtime app will connect as
+  `app_user` (Phase 2, below).
+
+**One clean initial migration; DB reset from scratch — no destructive op in a migration.**
+- The whole schema (documents/chunks/vectors + constraints, indexes, RLS, policies, grants)
+  is a single initial migration — no rename/backfill/truncate churn.
+- Prod holds no real data, so the transition is a **from-scratch reset** (drop tables +
+  `alembic_version`, or the whole DB, then `alembic upgrade head`) done **out-of-band**,
+  never as a statement inside a migration. Rationale: a `TRUNCATE` is irreversible, and
+  irreversible destructive operations must not live in a migration (migrations must be
+  reversible). If the DB ever holds real data before a schema change, the pattern flips to
+  add-nullable → backfill → `SET NOT NULL`.
+
+**Row-level multi-tenancy via Postgres RLS + a session GUC.**
+- Shared tables with an `owner_id` discriminator on `documents` only. `chunks`/`vectors`
+  isolate by **composing** through the parent's policy: their `USING`/`WITH CHECK` is a
+  subselect (`document_id IN (SELECT id FROM documents)`, `chunk_id IN (SELECT id FROM
+  chunks)`); the subselect is itself RLS-filtered, so a child row is visible iff its
+  document is. One source of truth (a single `owner_id`), no denormalized copies to keep in
+  sync. Requires an index on `chunks.document_id` (added; the FK had none).
+- Policies key off `current_setting('app.owner_id', true)::uuid`. Unset → NULL →
+  **fail-closed** (rows hidden, writes rejected by `WITH CHECK`). The app sets this GUC
+  **transaction-locally** per request (Phase 2 — a non-local `SET` would leak tenants across
+  pooled connections).
+- **Open blocker:** `owner_id`'s source. There is no auth yet (no users table, no JWT).
+  Until an authenticated identity supplies `owner_id`, a client-supplied value is spoofable;
+  real isolation is blocked on auth. Phase 2 uses a temporary dev owner.
+
+**ENABLE + FORCE — but the effective boundary is a non-owner role.**
+- All three tables `ENABLE` RLS (subjects non-owner roles) and `FORCE` RLS. Caveat learned
+  by testing: `FORCE` only subjects a **non-superuser** table owner. The compose/prod owner
+  `raguser` is a superuser with `BYPASSRLS`, so it bypasses RLS regardless of FORCE — FORCE
+  adds no protection against `raguser` as configured today. The effective isolation boundary
+  is the app connecting as **`app_user`** (non-superuser, no BYPASSRLS, non-owner), verified
+  fully isolated (tenant A/B cross-reads blocked, cross-writes rejected). FORCE is kept as
+  harmless hygiene — it becomes meaningful only if table ownership moves to a non-superuser.
+
+**`app_user` role is provisioning, not schema.**
+- The least-privilege login role is created **outside** Alembic (a role is a cluster-global
+  object and shouldn't carry a secret in migration history): `init-app-user.sh` in the
+  container's `initdb.d` locally (password from `APP_USER_PASSWORD`), and a one-time console
+  step on prod/Neon. The migration only `GRANT`s it `SELECT/INSERT/UPDATE/DELETE` on the
+  three tables (+ `USAGE` on schema). No sequence grants — UUID PKs are client-side.
+- Boundary rule: **Alembic owns intra-database schema; init.sql/infra owns databases and
+  roles.** Alembic can't `CREATE DATABASE` the DB it connects to, and the role must pre-exist
+  the GRANT (or the migration fails fast). Never duplicate table DDL across both.
 
 ---
 
@@ -288,6 +345,9 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Tests run against the Compose Postgres (`test` profile) in an isolated `rag_test`
   DB as `raguser`; Postgres publishes host port `5432`.
 - Test-DB creds couple `DB_PASSWORD_TEST` to `POSTGRES_PASSWORD` (same role).
+- `rag_test` is created by `init.sql`, which only runs on a **fresh** `pgdata` volume
+  (Postgres skips `initdb.d` entirely once the volume already has data). Against an
+  existing volume, `rag_test` must be created manually (`CREATE DATABASE rag_test;`) once.
 
 **CI.**
 - Uses a single `compose up` (`test` profile) to stand up Postgres, then runs
@@ -298,9 +358,10 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 ## Deferred / Out of Scope (v1)
 
-1. **`create_all` → Alembic.** `create_all` only creates missing tables; it never
-   `ALTER`s an existing one, so a model change silently leaves the live table on the
-   old schema. Dev workaround is drop + recreate.
+1. **`create_all` → Alembic.** *In progress:* the schema is now defined by an Alembic
+   migration (see *Migrations & Multi-tenancy*). Remaining gap: the test suite still
+   bootstraps via `create_all`, which builds no RLS/policies, so it neither exercises
+   isolation nor matches the migrated schema — switch test bootstrap to migrations.
 2. **Cross-encoder reranking of top-k.** v1 is bi-encoder retrieval only.
 3. ~~**Orphan chunks — accepted.**~~ Resolved: store and delete are now single atomic
    transactions in one Postgres DB, so neither orphan chunks nor orphan vectors occur
