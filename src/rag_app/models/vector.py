@@ -16,7 +16,7 @@ _EMBED_DIM = get_settings().embed_dim
 
 
 class Vector(Base):
-    __tablename__ = "stored_vectors"
+    __tablename__ = "vectors"
 
     chunk_id: Mapped[UUID] = mapped_column(
         ForeignKey("stored_chunks.id", ondelete="CASCADE"), primary_key=True

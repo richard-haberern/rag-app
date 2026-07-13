@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class Chunk(Base):
-    __tablename__ = "stored_chunks"
+    __tablename__ = "chunks"
     __table_args__ = (
         UniqueConstraint("document_id", "position", name="uq_chunk_document_position"),
     )

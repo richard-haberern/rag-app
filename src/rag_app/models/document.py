@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class Document(Base):
-    __tablename__ = "stored_documents"
+    __tablename__ = "documents"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     filename: Mapped[str]
