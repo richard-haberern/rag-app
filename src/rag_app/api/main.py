@@ -8,7 +8,6 @@ from httpx import AsyncClient
 
 from rag_app.api.routes import ingest, query, dev
 from rag_app.chunkings.factory import build_chunker
-from rag_app.db.bootstrap import init_db
 from rag_app.db.engine import make_engine, make_sessionmaker
 from rag_app.embeddings.embedder import Embedder
 from rag_app.llm.factory import build_llm_client
@@ -20,14 +19,15 @@ from rag_app.stores.document_store import DocStore
 from rag_app.config import get_settings
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import AppError
-
+from rag_app.stores.users_store import UserStore
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.engine = make_engine()
-    await init_db(
-        app.state.engine
-    )  # pgvector extension + Document/Chunk/Vector tables; idempotent, safe per boot
+    # Runtime connects as the least-privilege app_user (APP_DATABASE_URL) so RLS applies;
+    # Schema (extension + tables + RLS + grants)
+    # is owned by Alembic and must be applied (alembic upgrade head, as the owner) before boot
+    # -- app_user has DML grants only, so there is no init_db here.
+    app.state.engine = make_engine(get_settings().app_sqlalchemy_url)
     app.state.session_maker = make_sessionmaker(app.state.engine)
     app.state.http = AsyncClient()
     app.state.embedder = Embedder()
@@ -36,13 +36,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.chunk_store = ChunkStore()
     app.state.doc_store = DocStore()
     app.state.vec_store = PgVectorStore()
+    app.state.user_store = UserStore()
     app.state.ingestor = IngestionService(
         app.state.doc_store,
         app.state.chunk_store,
         app.state.vec_store,
         app.state.embedder,
         app.state.chunker,
-        app.state.session_maker,
     )
     app.state.retriever = RetrievalService(
         app.state.chunk_store,
@@ -50,7 +50,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.doc_store,
         app.state.embedder,
         app.state.chunker,
-        app.state.session_maker,
     )
     app.state.answerer = AnswerService(app.state.llm_client, app.state.retriever)
 
