@@ -33,8 +33,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
     - name: Start services
-      # --wait blocks until pg is healthy (nothing depends_on it in the test profile).
-      run: docker compose --env-file .env.ci --profile test up -d --wait
+      # --wait blocks until pg is healthy. Must target pg explicitly: pg-init is also in
+      # the test profile but is a one-shot job (restart: "no") that exits 0 on success --
+      # left implicit, `up --wait` would include it and fail on that exit.
+      run: docker compose --env-file .env.ci --profile test up -d --wait pg
     - name: Bootstrap Postgres (rag_test db + app_user role)
       # Idempotent (scripts/bootstrap-pg.sh) -- explicit step rather than relying on
       # docker-entrypoint-initdb.d, which only fires on a brand-new volume.
