@@ -1,3 +1,5 @@
+from uuid import UUID, uuid4
+
 import pytest
 from rag_app.db.engine import make_engine, make_sessionmaker
 from sqlalchemy import text
@@ -6,6 +8,7 @@ from rag_app.db.base import Base
 from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.stores.chunk_store import ChunkStore
+from rag_app.stores.users_store import UserStore
 from rag_app.config import Settings
 from tests.fakes import FakeTokenizer, FakeEmbedder, make_mock_llm_client
 from contextlib import asynccontextmanager
@@ -50,6 +53,11 @@ def chunk_store():
     return ChunkStore()
 
 
+@pytest.fixture
+def user_store():
+    return UserStore()
+
+
 # The vector store is now stateless: it takes a caller-owned session per method,
 # so no session_maker is needed to construct it.
 @pytest.fixture
@@ -60,16 +68,6 @@ def vec_store():
 @pytest.fixture
 def pg_vector_store():
     return PgVectorStore()
-
-
-@pytest.fixture(scope="session")
-async def setup_schema(engine):
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
 
 
 # Function-scoped and mutable: a test may tweak fields (e.g. chunk_size) without
@@ -116,8 +114,11 @@ async def make_llm_client():
         await client.aclose()
 
 
+# Schema (extension + tables + RLS + policies + grants) is provisioned out-of-band by
+# `alembic upgrade head` against rag_test before the suite runs. This
+# fixture only resets data between tests.
 @pytest.fixture
-def db_tests(setup_schema, truncate):
+def db_tests(truncate):
     pass
 
 
@@ -127,5 +128,58 @@ async def new_session(engine):
     async def _make():
         async with AsyncSession(engine, expire_on_commit=False) as s:
             yield s
+
+    return _make
+
+
+# --- RLS-aware fixtures: connect as app_user (non-superuser), so tenant isolation is
+# actually enforced. Use these to test owner_isolation behavior; use `session` for
+# everything else. Shape mirrors api/deps.py's set_guc_rw/set_guc_ro exactly: one
+# transaction per unit of work (session_maker.begin()), GUC set transaction-locally
+# for it -- no assumption that SQLAlchemy reuses the same pooled connection across
+# multiple commits, unlike a longer-lived session.
+
+
+@pytest.fixture(scope="session")
+async def app_engine(settings_session):
+    engine = make_engine(settings_session.app_sqlalchemy_url_test)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+def app_session(app_engine):
+    """Factory: `async with app_session(owner_id) as s` opens one transaction as
+    app_user with app.owner_id set transaction-locally for it (mirrors set_guc_rw).
+    `async with app_session() as s` with no owner_id leaves the GUC unset (mirrors
+    set_guc_ro with no resolved owner) -- the fail-closed path, directly testable."""
+    session_maker = make_sessionmaker(app_engine)
+
+    @asynccontextmanager
+    async def _make(owner_id: UUID | None = None):
+        async with session_maker.begin() as s:
+            if owner_id is not None:
+                await s.execute(
+                    text("SELECT set_config('app.owner_id', :id, true)"),
+                    {"id": str(owner_id)},
+                )
+            yield s
+
+    return _make
+
+
+@pytest.fixture
+def tenant(app_session, user_store):
+    """Factory: each call mints one fresh users row via UserStore.add_user in its own
+    (no-owner) transaction -- api/_helpers.py's _mint, minus the cookie. Call it more
+    than once per test for distinct tenants, e.g.
+    `owner_a, owner_b = await tenant(), await tenant()`, to test cross-tenant
+    isolation."""
+
+    async def _make() -> UUID:
+        new_id = uuid4()
+        async with app_session() as s:
+            await user_store.add_user(s, new_id)
+        return new_id
 
     return _make

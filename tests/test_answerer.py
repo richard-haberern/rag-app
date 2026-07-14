@@ -6,7 +6,6 @@ the test if the LLM is ever hit.
 """
 
 import httpx
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from rag_app.chunkings.chunker import Chunker
 from rag_app.services.answerer import AnswerService
@@ -24,6 +23,7 @@ async def test_get_answer_no_context_skips_llm(
     pg_vector_store,
     fake_embedder,
     fake_tokenizer,
+    new_session,
     db_tests,
 ):
     def exploding_handler(req: httpx.Request) -> httpx.Response:
@@ -33,16 +33,16 @@ async def test_get_answer_no_context_skips_llm(
     llm = LLMClient(model="fake", base_url="http://test", client=client)
 
     chunker = Chunker(fake_tokenizer, 20, 5)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     retriever = RetrievalService(
-        chunk_store, pg_vector_store, doc_store, fake_embedder, chunker, session_factory
+        chunk_store, pg_vector_store, doc_store, fake_embedder, chunker
     )
     answerer = AnswerService(llm, retriever)
 
     try:
         # Empty DB (db_tests truncated) -> search returns no chunks -> canned message, no LLM call.
         # with treshold added will test with non-empty db - TODO
-        resp = await answerer.get_answer("What is the meaning of life?", k=3)
+        async with new_session() as s:
+            resp = await answerer.get_answer(s, "What is the meaning of life?", k=3)
     finally:
         await client.aclose()
 

@@ -4,7 +4,6 @@ Uses the FakeEmbedder/FakeTokenizer doubles so nothing loads SentenceTransformer
 network; the stores, sessions and Chunker are real, against the test DB."""
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from uuid import uuid4
 
 from rag_app.chunkings.chunker import Chunker
@@ -26,43 +25,42 @@ _EXPECTED_CHUNKS = 3
 
 
 def _make_ingestor(
-    engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
 ):
     chunker = Chunker(fake_tokenizer, 20, 5)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return IngestionService(
-        doc_store, chunk_store, vec_store, fake_embedder, chunker, session_factory
+        doc_store, chunk_store, vec_store, fake_embedder, chunker
     )
 
 
 def _make_retriever(
-    engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
 ):
     chunker = Chunker(fake_tokenizer, 20, 5)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return RetrievalService(
-        chunk_store, vec_store, doc_store, fake_embedder, chunker, session_factory
+        chunk_store, vec_store, doc_store, fake_embedder, chunker
     )
 
 
 async def test_store_document_persists_doc_chunks_vectors(
-    engine,
     doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
     fake_tokenizer,
     new_session,
+    tenant,
     db_tests,
 ):
     doc = DocumentDTO(
-        uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, {"creator": "ambulance"}
+        uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, await tenant(), {"creator": "ambulance"}
     )
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
-
-    await ingestor.store_document(doc)
+    async with new_session() as s:
+        await ingestor.store_document(s, doc)
+        await s.commit()
 
     async with new_session() as s:
         ret_doc = await doc_store.get_document(s, doc.id)
@@ -81,26 +79,28 @@ async def test_store_document_persists_doc_chunks_vectors(
 
 
 async def test_store_document_dedupes_on_content_hash(
-    engine,
     doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
     fake_tokenizer,
     new_session,
+    tenant,
     db_tests,
 ):
     # Two distinct documents (different ids) sharing a content_hash: the second is a no-op because
     # DocStore.exists matches on content_hash.
-    doc1 = DocumentDTO(uuid4(), "first.txt", "same-hash", _FORTY_WORDS, {})
-    doc2 = DocumentDTO(uuid4(), "second.txt", "same-hash", _FORTY_WORDS, {})
+    doc1 = DocumentDTO(uuid4(), "first.txt", "same-hash", _FORTY_WORDS, await tenant(), {})
+    doc2 = DocumentDTO(uuid4(), "second.txt", "same-hash", _FORTY_WORDS, await tenant(), {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
-
-    await ingestor.store_document(doc1)
-    with pytest.raises(DocumentExists):
-        await ingestor.store_document(doc2)
+    async with new_session() as s:
+        await ingestor.store_document(s, doc1)
+        await s.commit()
+    async with new_session() as s:
+        with pytest.raises(DocumentExists):
+            await ingestor.store_document(s, doc2)
 
     async with new_session() as s:
         assert (await doc_store.get_document(s, doc1.id)).id == doc1.id
@@ -114,46 +114,52 @@ async def test_store_document_dedupes_on_content_hash(
 
 
 async def test_store_document_rejects_whitespace_only(
-    engine,
-    doc_store,
+        doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
     fake_tokenizer,
+    new_session,
+    tenant,
     db_tests,
 ):
-    doc = DocumentDTO(uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", {})
+    doc = DocumentDTO(uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", await tenant(), {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
-
-    with pytest.raises(EmptyDocument):
-        await ingestor.store_document(doc)
+    async with new_session() as s:
+        with pytest.raises(EmptyDocument):
+            await ingestor.store_document(s, doc)
 
 
 async def test_remove_document(
-    engine,
-    doc_store,
+        doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
     fake_tokenizer,
     db_tests,
+    tenant,
     new_session,
 ):
-    doc = DocumentDTO(uuid4(), "first.txt", "hash-of-the-file", _FORTY_WORDS, {})
+    doc = DocumentDTO(uuid4(), "first.txt", "hash-of-the-file", _FORTY_WORDS, await tenant(), {})
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     retriever = _make_retriever(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
-    await ingestor.store_document(doc)
+    async with new_session() as s:
+        await ingestor.store_document(s, doc)
+        await s.commit()
     async with new_session() as s:
         ch_ids = await chunk_store.get_chunk_ids_by_document(s, doc.id)
-    await ingestor.remove_document(doc.id)
-    with pytest.raises(DocumentNotFound):
-        await retriever.get_document(doc.id)
+    async with new_session() as s:
+        await ingestor.remove_document(s, doc.id)
+        await s.commit()
+    async with new_session() as s:
+        with pytest.raises(DocumentNotFound):
+            await retriever.get_document(s, doc.id)
     async with new_session() as s:
         assert await chunk_store.get_chunks_by_ids(s, ch_ids) == []
         for ch_id in ch_ids:
@@ -162,63 +168,69 @@ async def test_remove_document(
 
 
 async def test_get_stored_documents_ids(
-    engine,
-    doc_store,
+        doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
     fake_tokenizer,
     db_tests,
+    tenant,
     new_session,
 ):
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     retriever = _make_retriever(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     docs_info = [
-        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), {})
+        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), await tenant(), {})
         for i in range(4)
     ]
-    docs = [DocumentDTO(id, n, h, c, m) for id, n, h, c, m in docs_info]
-    for doc in docs:
-        await ingestor.store_document(doc)
+    docs = [DocumentDTO(id, n, h, c, t, m) for id, n, h, c, t, m in docs_info]
+    async with new_session() as s:
+        for doc in docs:
+            await ingestor.store_document(s, doc)
+            await s.commit()
 
-    docs_ids = await retriever.get_stored_documents_ids()
+    async with new_session() as s:
+        docs_ids = await retriever.get_stored_documents_ids(s)
     assert set(docs_ids) == {doc_info[0] for doc_info in docs_info}
 
 
 async def test_get_stored_documents_full_info(
-    engine,
-    doc_store,
+        doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
     fake_tokenizer,
     db_tests,
+    tenant,
     new_session,
 ):
     ingestor = _make_ingestor(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     retriever = _make_retriever(
-        engine, doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     docs_info = [
-        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), {})
+        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), await tenant(), {})
         for i in range(4)
     ]
-    docs = [DocumentDTO(id, n, h, c, m) for id, n, h, c, m in docs_info]
-    for doc in docs:
-        await ingestor.store_document(doc)
-
-    docDTOs = await retriever.get_stored_documents_DTOs()
+    docs = [DocumentDTO(id, n, h, c, t, m) for id, n, h, c, t, m in docs_info]
+    async with new_session() as s:
+        for doc in docs:
+            await ingestor.store_document(s, doc)
+        await s.commit()
+    async with new_session() as s:
+        docDTOs = await retriever.get_stored_documents_DTOs(s)
     by_id = {d.id: d for d in docDTOs}
     assert set(by_id) == {doc_info[0] for doc_info in docs_info}
-    for id_, name, content_hash, content, metadata in docs_info:
+    for id_, name, content_hash, content, owner_id, metadata in docs_info:
         d = by_id[id_]
         assert d.filename == name
         assert d.content_hash == content_hash
         assert d.content == content
         assert d.doc_metadata == metadata
+        assert d.owner_id == owner_id

@@ -5,7 +5,6 @@ from rag_app.schemas import DocumentDTO, ChunkDTO
 from rag_app.embeddings import Embedder
 from rag_app.services.answerer import AnswerService
 from rag_app.services.retriever import RetrievalService
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from rag_app.chunkings.chunker import Chunker
 
 from rag_app.exceptions import LLMBadAnswer
@@ -44,6 +43,7 @@ async def test_e2e(
     new_session,
     db_tests,
     settings,
+    tenant,
     tmp_path,
 ):
     f = tmp_path / "doc.txt"
@@ -56,9 +56,8 @@ async def test_e2e(
     )
     body = gemini_response("Good job everything works smoothly.")
     llm = make_llm_client(make_handler(body))
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     retriever = RetrievalService(
-        chunk_store, pg_vector_store, doc_store, embedder, chunker, session_factory
+        chunk_store, pg_vector_store, doc_store, embedder, chunker
     )
     answerer = AnswerService(llm, retriever)
     doc = DocumentDTO(
@@ -66,6 +65,7 @@ async def test_e2e(
         "doc.txt",
         str(f),
         "0123456789abcdef",
+        await tenant(),
         {"creator": "assasino", "size": 100},
     )
 
@@ -95,10 +95,11 @@ async def test_e2e(
 
     # threshold=2.0 (cosine-distance max) keeps the old no-threshold top-k behaviour these
     # ordering assertions were written against.
-    found_k = await retriever.search_topk_chunks("What is the meaning of life?", 3, 2.0)
+    async with new_session() as s:
+        found_k = await retriever.search_topk_chunks(s, "What is the meaning of life?", 3, 2.0)
     assert found_k[0] == "Meaning of life is someting noone can answer excpet C++"
     assert found_k[1] == "Life is beautiful."
     assert found_k[2] == "Sun is shining"
-
-    resp = await answerer.get_answer("What is the meaning of life?")
+    async with new_session() as s:
+        resp = await answerer.get_answer(s, "What is the meaning of life?")
     assert resp == "Good job everything works smoothly."
