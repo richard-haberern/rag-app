@@ -20,6 +20,7 @@ class DocStore:
                 content=document.content,
                 content_hash=document.content_hash,
                 doc_metadata=document.doc_metadata,
+                owner_id=document.owner_id
             )
         )
 
@@ -33,6 +34,7 @@ class DocStore:
             content_hash=doc.content_hash,
             content=doc.content,
             doc_metadata=doc.doc_metadata,
+            owner_id=doc.owner_id
         )
 
     async def get_document_content(self, session: AsyncSession, id: UUID) -> str:
@@ -47,7 +49,7 @@ class DocStore:
         result = await session.execute(select(Document))
         docs = result.scalars().all()
         return [
-            DocumentDTO(d.id, d.filename, d.content_hash, d.content, d.doc_metadata)
+            DocumentDTO(d.id, d.filename, d.content_hash, d.content, d.owner_id, d.doc_metadata)
             for d in docs
         ]
 
