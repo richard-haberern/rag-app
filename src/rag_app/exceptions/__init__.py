@@ -47,6 +47,8 @@ class InternalError(AppError):
 class ChunkNotFound(InternalError):
     default_message = "Chunk wasn't found."
 
+class UserNotFound(InternalError):
+    default_message = "User wasn't found."
 
 class VectorNotFound(InternalError):
     default_message = "Vector wasn't found."
