@@ -31,6 +31,11 @@ services:
         condition: service_healthy   # api won't start until pg_isready passes
     environment:
       # host is `pg` (the compose service name), not localhost.
+      # APP_DATABASE_URL = the least-privilege app_user role: this is what the running app
+      # connects as, so RLS is enforced. DATABASE_URL = the owner (raguser), used ONLY to run
+      # `alembic upgrade head` (e.g. `docker compose run --rm api alembic upgrade head`), which
+      # must happen before the app can serve (no init_db-on-boot anymore).
+      APP_DATABASE_URL: postgresql+asyncpg://app_user:${APP_USER_PASSWORD:-}@pg:5432/ragdb
       DATABASE_URL: postgresql+asyncpg://raguser:${POSTGRES_PASSWORD:-}@pg:5432/ragdb
       LLM_API_KEY: ${LLM_API_KEY:-}
     ports:
