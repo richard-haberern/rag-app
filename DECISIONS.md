@@ -226,11 +226,14 @@ deferred is intentionally out of scope for v1 — see the final section.
   `ValueError → 500` (genuinely-internal `ValueError`s fall through to the catch-all).
 - The exceptions module holds plain int status codes and does **not** import FastAPI —
   the domain layer stays decoupled from the web framework.
-- Duplicate `content_hash` now returns **409 `DocumentExists`** (contract change — was a
+- Duplicate content now returns **409 `DocumentExists`** (contract change — was a
   silent no-op that still returned a fresh `doc_id`). Detected by the `exists()` pre-check for
   the common case plus an `except IntegrityError` guard in `store_document` for the concurrent
-  TOCTOU race. Assumes `content_hash` is the only unique constraint a fresh-`uuid4` insert can
-  violate in that transaction; narrowing to the constraint name is a possible later refinement.
+  TOCTOU race. Dedup is **per-tenant**: the constraint is `UNIQUE(owner_id, content_hash)`, not a
+  global unique on `content_hash` — a global one would both block a second tenant storing
+  identical content and leak (via the 409) that another tenant holds it. The `IntegrityError`
+  guard therefore fires only on the caller's own duplicate; narrowing to the constraint name is a
+  possible later refinement.
 
 **Additive `POST /query/retrieve` endpoint for the demo frontend.**
 - The demo must *show* retrieval (the chunks are the proof the pipeline works), but
@@ -254,28 +257,29 @@ deferred is intentionally out of scope for v1 — see the final section.
   `static/` dir would exist locally but not in the container.
 - The frontend uses relative fetch URLs (same origin), so no CORS middleware is needed.
 
-**Schema bootstrap is one unified step.**
-- `init_db()` creates everything: the pgvector extension and the documents, chunks and
-  vectors tables. It runs on every boot (idempotent). There is no longer a per-backend
-  split.
+**Schema bootstrap is Alembic-only; the app no longer creates schema on boot.**
+- `init_db()` has been **removed from the API lifespan**. The running app connects as the
+  least-privilege `app_user` (DML grants only), which cannot `CREATE EXTENSION`/`CREATE TABLE`,
+  so it must never do DDL. Schema (extension + tables + RLS + policies + grants) is owned solely
+  by the Alembic migration and must be applied — `alembic upgrade head`, run **as the owner
+  `raguser`** — before the app can serve.
 - `init.sql` (the container's fresh-volume init) only creates the isolated `rag_test`
-  database; it does not create the extension. Consumers that need the extension create
-  it themselves: the app via `init_db`, the test suite via its `setup_schema` fixture.
-- `create_all` only creates missing tables; it never `ALTER`s an existing one, so
-  a model change silently leaves the live table on the old schema.
-- Dev workaround: drop and recreate.
-- `CREATE EXTENSION` needs a privileged role — fine in the local container, but a
-  deployment-time concern once it leaves the container.
-- Alembic is **now adopted** for the schema — see *Migrations & Multi-tenancy* below. The
-  `create_all` bootstrap above still backs the test suite (switching it to migrations is the
-  remaining gap).
+  database; the migration creates the `vector` extension. The test suite still creates its own
+  schema in its `setup_schema` fixture (switching it to migrations is the remaining gap).
+- `init_db`/`create_all` (`db/bootstrap.py`) is retained only for the test suite; production
+  and local runtime go through Alembic. `create_all` never `ALTER`s an existing table, which is
+  exactly why the runtime path no longer uses it.
 
 **Docker / distribution.**
 - Set the `LLM_API_KEY` env var to enable generation.
 - Distribution model is "clone + build".
-- The DB bootstrap lives in the API lifespan for v1; with Alembic it will move out.
-- Compose is now two services — `pg` (pgvector) and `api`. A stale image still runs its
-  own baked bootstrap, so rebuild (`--build`) after bootstrap changes.
+- DB schema is applied out-of-band via Alembic (as owner) before boot — it is **not** created
+  in the API lifespan anymore. In compose, run e.g. `docker compose run --rm api alembic
+  upgrade head` (the `api` service carries the owner `DATABASE_URL` for exactly this) before the
+  app serves.
+- Compose is two services — `pg` (pgvector) and `api`. The `api` service now has two URLs:
+  `APP_DATABASE_URL` (the app_user the runtime connects as, so RLS applies) and `DATABASE_URL`
+  (the owner, used only to run migrations).
 
 ---
 
@@ -285,8 +289,8 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Alembic 1.18 with the pyproject layout: operational config in `[tool.alembic]`
   (`pyproject.toml`); `alembic.ini` holds only logging. `env.py` is the async template,
   injecting `sqlalchemy.url` from Settings with `Base.metadata` as target.
-- Migrations/admin connect as the owner `raguser`; the runtime app will connect as
-  `app_user` (Phase 2, below).
+- Migrations/admin connect as the owner `raguser` (`DATABASE_URL`); the runtime app connects
+  as `app_user` (`APP_DATABASE_URL`) — **now wired** (see *Anonymous cookie tenancy* below).
 
 **One clean initial migration; DB reset from scratch — no destructive op in a migration.**
 - The whole schema (documents/chunks/vectors + constraints, indexes, RLS, policies, grants)
@@ -307,11 +311,12 @@ deferred is intentionally out of scope for v1 — see the final section.
   sync. Requires an index on `chunks.document_id` (added; the FK had none).
 - Policies key off `current_setting('app.owner_id', true)::uuid`. Unset → NULL →
   **fail-closed** (rows hidden, writes rejected by `WITH CHECK`). The app sets this GUC
-  **transaction-locally** per request (Phase 2 — a non-local `SET` would leak tenants across
-  pooled connections).
-- **Open blocker:** `owner_id`'s source. There is no auth yet (no users table, no JWT).
-  Until an authenticated identity supplies `owner_id`, a client-supplied value is spoofable;
-  real isolation is blocked on auth. Phase 2 uses a temporary dev owner.
+  **transaction-locally** per request via a `set_config(..., true)` in the `set_guc_rw`/
+  `set_guc_ro` dependency, which holds one `AsyncSession` (one connection, one transaction)
+  open across the request — a non-local `SET` would leak tenants across pooled connections.
+- **`owner_id`'s source is now the `users` registry** (resolved — see *Anonymous cookie
+  tenancy*). The value is not client-supplied-and-trusted: it comes from a server-signed cookie
+  (itsdangerous) validated against `users`, so a client cannot assert an arbitrary owner.
 
 **ENABLE + FORCE — but the effective boundary is a non-owner role.**
 - All three tables `ENABLE` RLS (subjects non-owner roles) and `FORCE` RLS. Caveat learned
@@ -331,6 +336,30 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Boundary rule: **Alembic owns intra-database schema; init.sql/infra owns databases and
   roles.** Alembic can't `CREATE DATABASE` the DB it connects to, and the role must pre-exist
   the GRANT (or the migration fails fast). Never duplicate table DDL across both.
+- The migration also `GRANT`s `app_user` `SELECT/INSERT/DELETE` on `users` (no `UPDATE`: a user
+  row is immutable once minted). `users` is deliberately **not** under RLS — see below.
+
+**Anonymous cookie tenancy (implemented).**
+- Identity is an anonymous per-visitor `owner_id` (UUIDv4) stored in a new `users(id,
+  created_at)` table — the registry the RLS `owner_id` keys off. Carried in a server-signed
+  cookie (`itsdangerous.Signer`; JWT is overkill for one unguessable UUID — the signature only
+  stops a client asserting a *known* other tenant's id, and retention is enforced server-side).
+- **`users` has no RLS.** The cookie dependency reads it *before* `app.owner_id` is set, so an
+  owner-keyed policy there would fail closed and force an infinite re-mint. It's the tenant
+  registry, managed by the app, not tenant-scoped data.
+- **Ownership FK drives the purge.** `documents.owner_id → users.id ON DELETE CASCADE`. Deleting
+  a user cascades to its documents → chunks → vectors. The cascade is an FK action, so it bypasses
+  RLS/`FORCE` even though the sweeping session has no `app.owner_id` set — but *only* as an FK
+  cascade; an app-issued `DELETE FROM documents` would be ordinary RLS-filtered DML and must never
+  replace it.
+- **Dependency split.** `resolve_owner` validates the cookie (no mint); `require_owner` mints on
+  miss (write paths only); `set_guc_rw` (writes) always sets the GUC, `set_guc_ro` (reads) sets it
+  only if a valid owner exists, else leaves it unset → reads fail closed to empty. Minting is
+  **write-only**: cookieless reads never create a `users` row (a crawler can't inflate the table).
+- **Retention.** `TTL` (config, a `timedelta`, default 30d) is the server-side retention window;
+  `cookie_expire` is the browser cookie max_age, kept aligned to TTL. Expired users are removed by
+  a **probabilistic inline sweep** (~10% per mint) — accepted MVP debt (only fires with new-cookie
+  traffic; the unlucky request pays the cascade delete). A background/`pg_cron` job is the later fix.
 
 ---
 

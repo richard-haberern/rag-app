@@ -79,8 +79,9 @@ flowchart LR
 - **Alembic-managed schema** — the schema (with row-level-security multi-tenancy) lives
   in a single initial migration; because there's no real data yet, the DB is **reset from
   scratch** rather than mutated, and no destructive op ever lives inside a migration.
-  Wiring the running app onto migrations + the least-privilege `app_user` role is in
-  progress (see DECISIONS.md → *Migrations & Multi-tenancy*).
+  The running app connects as the least-privilege `app_user` (so RLS is enforced) and no
+  longer creates schema on boot; `alembic upgrade head` (run as the owner) applies it (see
+  DECISIONS.md → *Migrations & Multi-tenancy*).
 
 ---
 
@@ -109,8 +110,15 @@ APP_USER_PASSWORD=change-me-too   # least-privilege RLS role, created on a fresh
 LLM_API_KEY=your-gemini-api-key   # required — generation calls Gemini
 EOF
 
-# 2. Build and start the stack (Postgres + api)
-docker compose up --build
+# 2. Build images, start Postgres, and apply the schema as the OWNER (raguser).
+#    The app runs as the least-privilege app_user and does NOT create schema on boot,
+#    so the migration must run first.
+docker compose build
+docker compose up -d pg
+docker compose run --rm api alembic upgrade head
+
+# 3. Start the app
+docker compose up api
 ```
 
 > ⏳ **First build/run is slow.** The api image installs **PyTorch** (~a few GB), and
@@ -123,8 +131,9 @@ Once it's up:
 - 🧪 Live demo (ingest → retrieve → answer) → <http://localhost:8000/demo.html>
 - 📖 Interactive docs (Swagger) → <http://localhost:8000/docs>
 
-The database schema is created automatically on startup: the pgvector extension and the
-documents, chunks and vectors tables.
+The database schema is applied by the Alembic migration in step 2 (the pgvector extension
+and the users, documents, chunks and vectors tables, with RLS). The app itself connects as
+`app_user` and does not create schema.
 
 > **Migrations & multi-tenancy.** The RLS-enabled schema is defined by an Alembic
 > migration (`alembic upgrade head`); a fresh volume auto-provisions the `app_user` role
@@ -136,17 +145,24 @@ documents, chunks and vectors tables.
 
 ```bash
 pip install -e .                       # needs Python 3.12
-# Postgres with pgvector running; set DB_PASSWORD + LLM_API_KEY in .env
+# Postgres with pgvector running. In .env set:
+#   DATABASE_URL      -> owner (raguser) connection, used by Alembic
+#   APP_DATABASE_URL  -> app_user connection, used by the running app (RLS applies)
+#   SECRET_KEY        -> signs the anonymous owner cookie
+#   LLM_API_KEY       -> generation
+alembic upgrade head                   # apply schema as the owner (DATABASE_URL), once
 uvicorn rag_app.api.main:app --reload
 ```
 
 ### Example
 
-A full ingest → ask → fetch round-trip:
+A full ingest → ask → fetch round-trip. Each visitor is an anonymous tenant identified by a
+signed `owner` cookie; ingest mints it, and the reads only see your own documents, so carry
+the cookie across calls (`-c`/`-b` a cookie jar):
 
 ```bash
-# 1. Ingest a document — returns its id
-curl -X POST http://localhost:8000/ingest/store \
+# 1. Ingest a document — mints the owner cookie (saved to cookies.txt), returns the doc id
+curl -c cookies.txt -X POST http://localhost:8000/ingest/store \
   -H "Content-Type: application/json" \
   -d '{
         "filename": "pangram.txt",
@@ -156,19 +172,19 @@ curl -X POST http://localhost:8000/ingest/store \
 # → "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
 # 2. See what retrieval finds — the top-k chunks for a query, in similarity order
-curl -X POST http://localhost:8000/query/retrieve \
+curl -b cookies.txt -X POST http://localhost:8000/query/retrieve \
   -H "Content-Type: application/json" \
   -d '{"query": "What does the fox jump over?"}'
 # → ["The quick brown fox jumps over the lazy dog."]
 
 # 3. Ask a question — the answer is grounded in your ingested documents
-curl -X POST http://localhost:8000/query/generate \
+curl -b cookies.txt -X POST http://localhost:8000/query/generate \
   -H "Content-Type: application/json" \
   -d '{"query": "What does the fox jump over?"}'
 # → "The fox jumps over the lazy dog."
 
 # 4. (optional) Fetch a stored document by id
-curl http://localhost:8000/query/documents/3fa85f64-5717-4562-b3fc-2c963f66afa6
+curl -b cookies.txt http://localhost:8000/query/documents/3fa85f64-5717-4562-b3fc-2c963f66afa6
 ```
 
 ---
