@@ -3,7 +3,7 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pathlib import Path
-
+from datetime import timedelta
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -20,7 +20,11 @@ class Settings(BaseSettings):
     db_name: str | None = None
     db_name_test: str | None = None
     # Optional full override; if set, takes precedence over the DB_* parts above.
+    # DATABASE_URL is the OWNER connection (raguser): used by Alembic for DDL/GRANTs.
     database_url: str | None = None
+    # APP_DATABASE_URL is the least-privilege app_user connection used by the running app,
+    # so RLS actually applies (a superuser/owner connection would bypass it). Full URL only.
+    app_database_url: str | None = None
     # asyncpg SSL toggle. Off for local/CI/test Postgres (no TLS); Neon and other
     # managed Postgres require it, so the deploy env sets DB_SSL=true.
     db_ssl: bool = False
@@ -52,6 +56,20 @@ class Settings(BaseSettings):
     # Directory served at "/" by the static mount. Default resolves to the repo-root
     # static/ (works when run from the repo tree); Docker overrides via STATIC_DIR.
     static_dir: str = str(Path(__file__).resolve().parents[2] / "static")
+
+    secure: bool = False
+    secret_key: list[str] | None = None
+    # Anonymous-tenant identity lifetime. TTL is the server-side data-retention window (a
+    # user row and its documents survive this long); cookie_expire is the browser cookie's
+    # max_age in seconds. Keep them aligned so the cookie and the data expire together.
+    TTL: timedelta = timedelta(days=30)
+    cookie_expire: int = int(timedelta(days=30).total_seconds())
+
+    @property
+    def app_sqlalchemy_url(self) -> str:
+        if self.app_database_url is None:
+            raise ValueError("APP_DATABASE_URL is required to build the app_user database URL")
+        return self.app_database_url
 
     @property
     def sqlalchemy_url(self) -> str:
