@@ -1,10 +1,15 @@
 """Initial schema with row-level security
 
-Creates the documents, chunks and vectors tables in their final multi-tenant shape:
-owner_id on documents, FK-composed RLS on the children, ENABLE + FORCE row-level
-security, the owner_isolation policies keyed to the app.owner_id GUC, and the GRANTs
-for the least-privilege app_user role (which must already exist -- provisioned via
-init.sql locally / the console on prod).
+Creates the users, documents, chunks and vectors tables in their final multi-tenant shape:
+a users registry (the tenant identities), owner_id on documents FK'd to users with
+ON DELETE CASCADE (so sweeping a user purges its data), FK-composed RLS on the children,
+ENABLE + FORCE row-level security on the tenant-scoped tables, the owner_isolation policies
+keyed to the app.owner_id GUC, and the GRANTs for the least-privilege app_user role (which
+must already exist -- provisioned via init-app-user.sh locally / the console on prod).
+
+users itself is deliberately NOT under RLS: it's the registry the cookie dependency reads
+BEFORE the app.owner_id GUC is set, so an owner-keyed policy there would fail closed and
+force an infinite re-mint.
 
 Revision ID: 2b535d2f1f1d
 Revises:
@@ -30,6 +35,20 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
+    # Tenant registry. created_at is DB-clock stamped (server default); the sweep expires a
+    # user on created_at + TTL. No RLS on this table (see module docstring).
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+
     op.create_table(
         "documents",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -38,8 +57,11 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("content_hash"),
+        # Per-tenant dedup, not global: two tenants may store identical content, and a global
+        # unique would both block that and leak (409) that another tenant holds it.
+        sa.UniqueConstraint("owner_id", "content_hash", name="uq_document_owner_hash"),
     )
     op.create_index("ix_documents_owner_id", "documents", ["owner_id"])
 
@@ -72,14 +94,17 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
 
     # Only documents carries owner_id. The children compose through the parent's policy:
-    # the subselect is itself RLS-filtered, so a chunk/vector is visible iff its document
-    # is. current_setting(..., true) returns NULL when unset -> fail-closed (rows hidden,
-    # writes rejected by WITH CHECK).
+    # the subselect is itself RLS-filtered, so a chunk/vector is visible if its document
+    # is. NULLIF(..., '') is load-bearing: current_setting('app.owner_id', true) is NULL only
+    # until the GUC is first set on a connection; after a transaction-local set is reset
+    # (the pooled-connection case for an anonymous request that skips set_config), it reads
+    # back as '' -- and ''::uuid raises. NULLIF folds both NULL and '' to NULL so the policy
+    # fail-closes (rows hidden, writes rejected by WITH CHECK) instead of erroring.
     op.execute(
         """
         CREATE POLICY owner_isolation ON documents
-          USING      (owner_id = current_setting('app.owner_id', true)::uuid)
-          WITH CHECK (owner_id = current_setting('app.owner_id', true)::uuid)
+          USING      (owner_id = NULLIF(current_setting('app.owner_id', true), '')::uuid)
+          WITH CHECK (owner_id = NULLIF(current_setting('app.owner_id', true), '')::uuid)
         """
     )
     op.execute(
@@ -103,6 +128,9 @@ def upgrade() -> None:
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON documents, chunks, vectors TO app_user"
     )
+    # users is not RLS-protected; app_user reads/creates/sweeps rows directly. No UPDATE:
+    # a user row is immutable (id + created_at) once minted.
+    op.execute("GRANT SELECT, INSERT, DELETE ON users TO app_user")
 
 
 def downgrade() -> None:
@@ -113,3 +141,4 @@ def downgrade() -> None:
     op.drop_table("vectors")
     op.drop_table("chunks")
     op.drop_table("documents")
+    op.drop_table("users")
