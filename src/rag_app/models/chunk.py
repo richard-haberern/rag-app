@@ -22,7 +22,7 @@ class Chunk(Base):
     content: Mapped[str]
     position: Mapped[int]
     document_id: Mapped[UUID] = mapped_column(
-        ForeignKey("stored_documents.id", ondelete="CASCADE")
+        ForeignKey("documents.id", ondelete="CASCADE")
     )
 
     original_document: Mapped["Document"] = relationship(back_populates="chunks")

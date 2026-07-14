@@ -19,7 +19,7 @@ class Vector(Base):
     __tablename__ = "vectors"
 
     chunk_id: Mapped[UUID] = mapped_column(
-        ForeignKey("stored_chunks.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True
     )
     content: Mapped[Embedding] = mapped_column(PgVector(_EMBED_DIM))
 
