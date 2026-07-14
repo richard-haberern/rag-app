@@ -6,14 +6,9 @@ services:
       POSTGRES_USER: raguser
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ragdb
-      # Password for the least-privilege app_user role created by init-app-user.sh.
-      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-}
     volumes:
-      # data that persists the -v 
+      # data that persists the -v
       - pgdata:/var/lib/postgresql/data
-      # bind mounts - injecting files from my host
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro 
-      - ./init-app-user.sh:/docker-entrypoint-initdb.d/init-app-user.sh:ro
     ports:
       - "5432:5432"   # host-run pytest (profile test) reaches rag_test at localhost:5432
     healthcheck:
@@ -22,6 +17,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # One-shot, idempotent: creates the rag_test database and the app_user role if either
+  # is missing. Unlike docker-entrypoint-initdb.d scripts (which only ever run once, on a
+  # brand-new pg volume), this is safe to re-run against any volume -- run it explicitly
+  # with `docker compose run --rm pg-init` after `pg` is up, before `alembic upgrade head`
+  # / the app / the test suite. See scripts/bootstrap-pg.sh.
+  pg-init:
+    image: pgvector/pgvector:pg16
+    profiles: ["app", "test"]
+    depends_on:
+      pg:
+        condition: service_healthy
+    environment:
+      PGHOST: pg
+      PGUSER: raguser
+      PGPASSWORD: ${POSTGRES_PASSWORD:-}
+      PGDATABASE: ragdb
+      # Password for the least-privilege app_user role bootstrap-pg.sh creates.
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-}
+    volumes:
+      - ./scripts/bootstrap-pg.sh:/bootstrap-pg.sh:ro
+    entrypoint: ["bash", "/bootstrap-pg.sh"]
+    restart: "no"
 
   api:
     build: .

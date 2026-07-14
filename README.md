@@ -110,11 +110,12 @@ APP_USER_PASSWORD=change-me-too   # least-privilege RLS role, created on a fresh
 LLM_API_KEY=your-gemini-api-key   # required — generation calls Gemini
 EOF
 
-# 2. Build images, start Postgres, and apply the schema as the OWNER (raguser).
-#    The app runs as the least-privilege app_user and does NOT create schema on boot,
-#    so the migration must run first.
+# 2. Build images, start Postgres, provision it (rag_test db + app_user role), and
+#    apply the schema as the OWNER (raguser). The app runs as the least-privilege
+#    app_user and does NOT create schema on boot, so the migration must run first.
 docker compose build
 docker compose up -d pg
+docker compose run --rm pg-init
 docker compose run --rm api alembic upgrade head
 
 # 3. Start the app
@@ -136,10 +137,12 @@ and the users, documents, chunks and vectors tables, with RLS). The app itself c
 `app_user` and does not create schema.
 
 > **Migrations & multi-tenancy.** The RLS-enabled schema is defined by an Alembic
-> migration (`alembic upgrade head`); a fresh volume auto-provisions the `app_user` role
-> via `init-app-user.sh`. To reset from scratch (safe — no real data): local
-> `docker compose down -v` then re-run the migration; on prod/Neon create `app_user` once
-> via the console, then `alembic upgrade head`. Never truncate/backfill inside a migration.
+> migration (`alembic upgrade head`); `docker compose run --rm pg-init` provisions the
+> `app_user` role (`scripts/bootstrap-pg.sh`, idempotent — safe to re-run against any
+> volume, fresh or existing). To reset from scratch (safe — no real data): local
+> `docker compose down -v` then re-run `pg-init` + the migration; on prod/Neon create
+> `app_user` once via the console, then `alembic upgrade head`. Never truncate/backfill
+> inside a migration.
 
 ### Run locally (without Docker)
 
@@ -209,19 +212,33 @@ tests/
 
 ## Testing
 
-Run the suite with:
+Tests run against the Compose Postgres (`test` profile) in an isolated `rag_test`
+database, published on `localhost:5432`. Bring it up and apply the schema once (both
+steps are idempotent — safe to re-run):
 
 ```bash
+docker compose --profile test up -d --wait pg
+docker compose run --rm pg-init                                        # rag_test db + app_user role
+DATABASE_URL=postgresql+asyncpg://raguser:$POSTGRES_PASSWORD@localhost:5432/rag_test \
+  alembic upgrade head                                                 # schema, incl. RLS/policies/grants
 python -m pytest
 ```
 
 The test design is deliberate:
 
 - **Isolation** via truncate-before-yield fixtures, so each test starts from a clean DB.
+- **Schema parity with prod**: `rag_test` is provisioned by the same Alembic migration as
+  the real DB (not a separate `create_all` path), so RLS/policies/grants are identical.
+- **RLS is testable**: `app_session`/`tenant` fixtures (`tests/conftest.py`) open a
+  connection as `app_user` with `app.owner_id` set for a fresh tenant, so tenant-isolation
+  behavior can be asserted directly, alongside the plain `session` fixture (`raguser`,
+  bypasses RLS — a superuser) used for everything else.
 - **Three-tier embedder strategy**: dummy vectors for store/ingest tests, hand-placed
   known vectors for retrieval-SQL tests (so distances are predictable), and the real
   model only for end-to-end tests.
 - **The LLM client is faked** with `httpx.MockTransport` — no network calls in tests.
+
+CI (`.github/workflows/ci.yaml`) runs the same sequence against a committed `.env.ci`.
 
 ---
 

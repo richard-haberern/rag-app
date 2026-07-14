@@ -35,6 +35,15 @@ jobs:
     - name: Start services
       # --wait blocks until pg is healthy (nothing depends_on it in the test profile).
       run: docker compose --env-file .env.ci --profile test up -d --wait
+    - name: Bootstrap Postgres (rag_test db + app_user role)
+      # Idempotent (scripts/bootstrap-pg.sh) -- explicit step rather than relying on
+      # docker-entrypoint-initdb.d, which only fires on a brand-new volume.
+      run: docker compose --env-file .env.ci run --rm pg-init
+    - name: Apply schema to rag_test (alembic upgrade head)
+      # Same command the app itself runs before serving (see docker-compose.yaml's api
+      # service / README) -- test schema (incl. RLS/policies/grants) now matches prod
+      # exactly instead of a separate create_all path.
+      run: DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD_TEST}@${DB_HOST}:${DB_PORT}/${DB_NAME_TEST}" alembic upgrade head
     - name: Lint with ruff
       run: |
         ruff check ./src

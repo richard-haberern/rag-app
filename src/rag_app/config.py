@@ -19,12 +19,16 @@ class Settings(BaseSettings):
     db_port: int = 5432
     db_name: str | None = None
     db_name_test: str | None = None
+    test_database_url: str | None = None
     # Optional full override; if set, takes precedence over the DB_* parts above.
     # DATABASE_URL is the OWNER connection (raguser): used by Alembic for DDL/GRANTs.
     database_url: str | None = None
     # APP_DATABASE_URL is the least-privilege app_user connection used by the running app,
     # so RLS actually applies (a superuser/owner connection would bypass it). Full URL only.
     app_database_url: str | None = None
+    # app_user connection to rag_test, for fixtures that need RLS actually enforced (raguser
+    # is a superuser and bypasses it). Full URL only, mirroring app_database_url.
+    app_database_url_test: str | None = None
     # asyncpg SSL toggle. Off for local/CI/test Postgres (no TLS); Neon and other
     # managed Postgres require it, so the deploy env sets DB_SSL=true.
     db_ssl: bool = False
@@ -72,6 +76,14 @@ class Settings(BaseSettings):
         return self.app_database_url
 
     @property
+    def app_sqlalchemy_url_test(self) -> str:
+        if self.app_database_url_test is None:
+            raise ValueError(
+                "APP_DATABASE_URL_TEST is required to build the app_user test database URL"
+            )
+        return self.app_database_url_test
+
+    @property
     def sqlalchemy_url(self) -> str:
         if self.database_url:
             return self.database_url
@@ -87,6 +99,8 @@ class Settings(BaseSettings):
         # Deliberately ignores database_url: the test URL must be built from the
         # explicit DB_*_TEST parts so the suite's TRUNCATE/DROP can never alias prod
         # via a stray DATABASE_URL. (Flag for DECISIONS.md.)
+        if self.test_database_url:
+            return self.test_database_url
         if self.db_password_test is None:
             raise ValueError(
                 "DB_PASSWORD_TEST is required to build the test database URL"

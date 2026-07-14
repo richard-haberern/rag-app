@@ -54,7 +54,8 @@ class DocStore:
         ]
 
     async def get_stored_documents_ids(self, session: AsyncSession) -> Sequence[UUID]:
-        result = await session.execute(select(Document.id))
+        # need to add created_at so we can order by that
+        result = await session.execute(select(Document.id).order_by(Document.id))
         return result.scalars().all()
 
     async def remove_document(self, session: AsyncSession, id: UUID) -> None:

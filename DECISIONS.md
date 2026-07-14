@@ -263,12 +263,10 @@ deferred is intentionally out of scope for v1 — see the final section.
   so it must never do DDL. Schema (extension + tables + RLS + policies + grants) is owned solely
   by the Alembic migration and must be applied — `alembic upgrade head`, run **as the owner
   `raguser`** — before the app can serve.
-- `init.sql` (the container's fresh-volume init) only creates the isolated `rag_test`
-  database; the migration creates the `vector` extension. The test suite still creates its own
-  schema in its `setup_schema` fixture (switching it to migrations is the remaining gap).
-- `init_db`/`create_all` (`db/bootstrap.py`) is retained only for the test suite; production
-  and local runtime go through Alembic. `create_all` never `ALTER`s an existing table, which is
-  exactly why the runtime path no longer uses it.
+- `scripts/bootstrap-pg.sh` (run via `docker compose run --rm pg-init`) only creates the
+  isolated `rag_test` database and the `app_user` role; the migration creates the `vector`
+  extension. The test suite now applies the same migration against `rag_test` — see
+  *Testing & CI* — so `create_all` is gone entirely; nothing bootstraps schema except Alembic.
 
 **Docker / distribution.**
 - Set the `LLM_API_KEY` env var to enable generation.
@@ -277,9 +275,12 @@ deferred is intentionally out of scope for v1 — see the final section.
   in the API lifespan anymore. In compose, run e.g. `docker compose run --rm api alembic
   upgrade head` (the `api` service carries the owner `DATABASE_URL` for exactly this) before the
   app serves.
-- Compose is two services — `pg` (pgvector) and `api`. The `api` service now has two URLs:
-  `APP_DATABASE_URL` (the app_user the runtime connects as, so RLS applies) and `DATABASE_URL`
-  (the owner, used only to run migrations).
+- Compose is three services — `pg` (pgvector), `pg-init` (one-shot, idempotent: creates
+  `rag_test` + the `app_user` role, `scripts/bootstrap-pg.sh` — run explicitly with
+  `docker compose run --rm pg-init`, not wired via `depends_on`, so the ordering is visible
+  in a command rather than implied by compose's dependency graph), and `api`. The `api`
+  service has two URLs: `APP_DATABASE_URL` (the app_user the runtime connects as, so RLS
+  applies) and `DATABASE_URL` (the owner, used only to run migrations).
 
 ---
 
@@ -329,13 +330,16 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **`app_user` role is provisioning, not schema.**
 - The least-privilege login role is created **outside** Alembic (a role is a cluster-global
-  object and shouldn't carry a secret in migration history): `init-app-user.sh` in the
-  container's `initdb.d` locally (password from `APP_USER_PASSWORD`), and a one-time console
-  step on prod/Neon. The migration only `GRANT`s it `SELECT/INSERT/UPDATE/DELETE` on the
-  three tables (+ `USAGE` on schema). No sequence grants — UUID PKs are client-side.
-- Boundary rule: **Alembic owns intra-database schema; init.sql/infra owns databases and
-  roles.** Alembic can't `CREATE DATABASE` the DB it connects to, and the role must pre-exist
-  the GRANT (or the migration fails fast). Never duplicate table DDL across both.
+  object and shouldn't carry a secret in migration history): `scripts/bootstrap-pg.sh`, run
+  explicitly via `docker compose run --rm pg-init` (password from `APP_USER_PASSWORD`), and a
+  one-time console step on prod/Neon. Idempotent and volume-age-independent (checks
+  `pg_roles`/`pg_database` before creating), unlike the `docker-entrypoint-initdb.d` scripts it
+  replaced, which only ever ran once, on a brand-new volume. The migration only `GRANT`s it
+  `SELECT/INSERT/UPDATE/DELETE` on the three tables (+ `USAGE` on schema). No sequence grants —
+  UUID PKs are client-side.
+- Boundary rule: **Alembic owns intra-database schema; bootstrap-pg.sh/infra owns databases
+  and roles.** Alembic can't `CREATE DATABASE` the DB it connects to, and the role must
+  pre-exist the GRANT (or the migration fails fast). Never duplicate table DDL across both.
 - The migration also `GRANT`s `app_user` `SELECT/INSERT/DELETE` on `users` (no `UPDATE`: a user
   row is immutable once minted). `users` is deliberately **not** under RLS — see below.
 
@@ -372,25 +376,40 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **Postgres test database.**
 - Tests run against the Compose Postgres (`test` profile) in an isolated `rag_test`
-  DB as `raguser`; Postgres publishes host port `5432`.
-- Test-DB creds couple `DB_PASSWORD_TEST` to `POSTGRES_PASSWORD` (same role).
-- `rag_test` is created by `init.sql`, which only runs on a **fresh** `pgdata` volume
-  (Postgres skips `initdb.d` entirely once the volume already has data). Against an
-  existing volume, `rag_test` must be created manually (`CREATE DATABASE rag_test;`) once.
+  DB; Postgres publishes host port `5432`.
+- `rag_test` and the `app_user` role are provisioned idempotently by
+  `docker compose run --rm pg-init` (`scripts/bootstrap-pg.sh`) — safe to re-run against
+  any volume, fresh or existing, replacing the old fresh-volume-only `initdb.d` scripts.
+- Schema is applied with `alembic upgrade head` against `rag_test` (`DATABASE_URL`
+  pointed at it, owner creds) before the suite runs — the **same migration** as prod, so
+  RLS/policies/grants are identical; `conftest.py` no longer bootstraps schema itself
+  (the `setup_schema`/`create_all` fixture is gone).
+- Two connections are available to tests: the plain `session` fixture (`raguser` — a
+  superuser, bypasses RLS; used for everything not specifically testing isolation) and
+  `app_session`/`tenant` (`app_user`, `app.owner_id` set for a fresh tenant — actually
+  RLS-enforced, mirroring `api/deps.py`'s `set_guc_rw`). `APP_DATABASE_URL_TEST` (new
+  `Settings` field) supplies the `app_user`→`rag_test` URL. RLS isolation is now
+  testable; writing the isolation-behavior tests themselves is still open.
+- Test-DB creds couple `DB_PASSWORD_TEST`/`APP_DATABASE_URL_TEST`'s password to
+  `POSTGRES_PASSWORD`/`APP_USER_PASSWORD` (same roles).
 
 **CI.**
-- Uses a single `compose up` (`test` profile) to stand up Postgres, then runs
-  host-side pytest against it.
+- Uses a single `compose up` (`test` profile) to stand up Postgres, then `docker compose
+  run --rm pg-init` + `alembic upgrade head` (against `rag_test`) to provision and
+  schema-load it, then runs host-side pytest against it — the same sequence documented
+  for local runs (README *Testing*), so CI and local no longer diverge in how the test DB
+  gets ready.
 - Uses a committed `.env.ci` file with test credentials against a test DB.
 
 ---
 
 ## Deferred / Out of Scope (v1)
 
-1. **`create_all` → Alembic.** *In progress:* the schema is now defined by an Alembic
-   migration (see *Migrations & Multi-tenancy*). Remaining gap: the test suite still
-   bootstraps via `create_all`, which builds no RLS/policies, so it neither exercises
-   isolation nor matches the migrated schema — switch test bootstrap to migrations.
+1. ~~**`create_all` → Alembic.**~~ Resolved: the schema (prod and test) is defined solely
+   by the Alembic migration (see *Migrations & Multi-tenancy*, *Testing & CI*).
+   `rag_test` is schema-loaded with `alembic upgrade head`, same as prod, and
+   `app_session`/`tenant` fixtures make RLS isolation testable — the remaining gap is
+   writing the isolation-behavior tests themselves, not the infra to support them.
 2. **Cross-encoder reranking of top-k.** v1 is bi-encoder retrieval only.
 3. ~~**Orphan chunks — accepted.**~~ Resolved: store and delete are now single atomic
    transactions in one Postgres DB, so neither orphan chunks nor orphan vectors occur
