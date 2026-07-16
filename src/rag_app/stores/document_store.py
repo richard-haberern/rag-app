@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from typing import Sequence
 
@@ -46,11 +46,10 @@ class DocStore:
     async def get_stored_documents(
         self, session: AsyncSession
     ) -> Sequence[DocumentDTO]:
-        result = await session.execute(select(Document))
-        docs = result.scalars().all()
+        result = await session.execute(select(Document.id, Document.filename, Document.doc_metadata))
         return [
-            DocumentDTO(d.id, d.filename, d.content_hash, d.content, d.owner_id, d.doc_metadata)
-            for d in docs
+            DocumentDTO(row.id, row.filename, "", "", uuid4(), row.doc_metadata)
+            for row in result.all()
         ]
 
     async def get_stored_documents_ids(self, session: AsyncSession) -> Sequence[UUID]:

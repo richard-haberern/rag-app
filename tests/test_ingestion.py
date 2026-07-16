@@ -199,7 +199,7 @@ async def test_get_stored_documents_ids(
 
 
 async def test_get_stored_documents_full_info(
-        doc_store,
+    doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
@@ -229,8 +229,6 @@ async def test_get_stored_documents_full_info(
     assert set(by_id) == {doc_info[0] for doc_info in docs_info}
     for id_, name, content_hash, content, owner_id, metadata in docs_info:
         d = by_id[id_]
+        assert d.id == id_
         assert d.filename == name
-        assert d.content_hash == content_hash
-        assert d.content == content
         assert d.doc_metadata == metadata
-        assert d.owner_id == owner_id

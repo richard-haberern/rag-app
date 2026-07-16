@@ -29,7 +29,6 @@ class RetrievalService:
         self.embedder = embedder
         self.chunker = chunker
 
-    # later need to add threshold
     async def search_topk_chunks(
         self, session: AsyncSession, query: str, k: int, threshold: float
     ) -> list[str]:

@@ -7,7 +7,7 @@ from itsdangerous import BadSignature
 
 from fastapi import Request, Response, Depends
 
-from typing import Annotated, AsyncGenerator, Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from rag_app.api._helpers import _mint, _check_owner, _signer
@@ -54,7 +54,7 @@ async def require_owner(
 
 async def set_guc_rw(
     request: Request, owner_id: Annotated[UUID, Depends(require_owner)]
-) -> AsyncGenerator[Any]:
+) -> Any:
     """Request-scoped session for writes: app.owner_id is always set (require_owner
     guarantees an identity). set_config(..., true) is transaction-local, so it lives exactly
     as long as this transaction and every query on `s` is RLS-scoped to the owner."""
@@ -67,7 +67,7 @@ async def set_guc_rw(
 
 async def set_guc_ro(
     request: Request, owner_id: Annotated[UUID | None, Depends(resolve_owner)]
-) -> AsyncGenerator[Any]:
+) -> Any:
     """Request-scoped session for reads. With no valid owner the GUC is left unset ->
     current_setting('app.owner_id', true) is NULL -> RLS returns nothing, and no user is
     minted (reads never create identities)."""
