@@ -28,3 +28,8 @@ DEVLOG.md
 CLAUDE.md
 TODO.txt
 functions.sql
+
+#graphify
+graphify-out/**/*
+
+.claude
