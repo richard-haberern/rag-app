@@ -8,7 +8,6 @@ from rag_app.db.base import Base
 from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.stores.chunk_store import ChunkStore
-from rag_app.stores.users_store import UserStore
 from rag_app.config import Settings
 from tests.fakes import FakeTokenizer, FakeEmbedder, make_mock_llm_client
 from contextlib import asynccontextmanager
@@ -16,7 +15,7 @@ from contextlib import asynccontextmanager
 
 @pytest.fixture(scope="session")
 async def engine(settings_session):
-    engine = make_engine(settings_session.sqlalchemy_url_test)
+    engine = make_engine(settings_session.test_sqlalchemy_url)
     yield engine
     await engine.dispose()
 
@@ -52,10 +51,6 @@ def doc_store():
 def chunk_store():
     return ChunkStore()
 
-
-@pytest.fixture
-def user_store():
-    return UserStore()
 
 
 # The vector store is now stateless: it takes a caller-owned session per method,
@@ -142,7 +137,7 @@ async def new_session(engine):
 
 @pytest.fixture(scope="session")
 async def app_engine(settings_session):
-    engine = make_engine(settings_session.app_sqlalchemy_url_test)
+    engine = make_engine(settings_session.test_app_sqlalchemy_url)
     yield engine
     await engine.dispose()
 

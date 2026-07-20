@@ -281,8 +281,14 @@ async def test_vec_store_get_values_by_chunk_id_eror(
 
 
 async def test_vec_store_search(
-    vec_store, doc_store, chunk_store, fake_embedder, session, db_tests,
-    tenant, settings_session,
+    vec_store,
+    doc_store,
+    chunk_store,
+    fake_embedder,
+    session,
+    db_tests,
+    tenant,
+    settings_session,
 ):
     doc = DocumentDTO(
         uuid4(),
@@ -339,8 +345,14 @@ async def test_vec_store_search_bad_k(vec_store, session, db_tests, settings_ses
 
 
 async def test_vec_store_search_k_bigger_than_db_records(
-    vec_store, doc_store, chunk_store, fake_embedder, session,
-    db_tests, tenant, settings_session,
+    vec_store,
+    doc_store,
+    chunk_store,
+    fake_embedder,
+    session,
+    db_tests,
+    tenant,
+    settings_session,
 ):
     doc = DocumentDTO(
         uuid4(),
@@ -403,7 +415,12 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     # FK ON DELETE CASCADE (+ passive_deletes) means deleting the document removes its chunks, and
     # in turn their vectors, at the DB level.
     doc = DocumentDTO(
-        uuid4(), "file1.txt", "hash-cascade", "some amazing content in the file", await tenant(), {}
+        uuid4(),
+        "file1.txt",
+        "hash-cascade",
+        "some amazing content in the file",
+        await tenant(),
+        {},
     )
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for _ in range(2)]

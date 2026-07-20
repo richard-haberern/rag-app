@@ -96,7 +96,9 @@ async def test_e2e(
     # threshold=2.0 (cosine-distance max) keeps the old no-threshold top-k behaviour these
     # ordering assertions were written against.
     async with new_session() as s:
-        found_k = await retriever.search_topk_chunks(s, "What is the meaning of life?", 3, 2.0)
+        found_k = await retriever.search_topk_chunks(
+            s, "What is the meaning of life?", 3, 2.0
+        )
     assert found_k[0] == "Meaning of life is someting noone can answer excpet C++"
     assert found_k[1] == "Life is beautiful."
     assert found_k[2] == "Sun is shining"

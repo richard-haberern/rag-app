@@ -24,22 +24,14 @@ _FORTY_WORDS = """w01 w02 w03 w04 w05 w06 w07 w08 w09 w10 w11 w12 w13 w14 w15 w1
 _EXPECTED_CHUNKS = 3
 
 
-def _make_ingestor(
-    doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
-):
+def _make_ingestor(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer):
     chunker = Chunker(fake_tokenizer, 20, 5)
-    return IngestionService(
-        doc_store, chunk_store, vec_store, fake_embedder, chunker
-    )
+    return IngestionService(doc_store, chunk_store, vec_store, fake_embedder, chunker)
 
 
-def _make_retriever(
-    doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
-):
+def _make_retriever(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer):
     chunker = Chunker(fake_tokenizer, 20, 5)
-    return RetrievalService(
-        chunk_store, vec_store, doc_store, fake_embedder, chunker
-    )
+    return RetrievalService(chunk_store, vec_store, doc_store, fake_embedder, chunker)
 
 
 async def test_store_document_persists_doc_chunks_vectors(
@@ -53,7 +45,12 @@ async def test_store_document_persists_doc_chunks_vectors(
     db_tests,
 ):
     doc = DocumentDTO(
-        uuid4(), "doc.txt", "hash-it", _FORTY_WORDS, await tenant(), {"creator": "ambulance"}
+        uuid4(),
+        "doc.txt",
+        "hash-it",
+        _FORTY_WORDS,
+        await tenant(),
+        {"creator": "ambulance"},
     )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
@@ -90,8 +87,12 @@ async def test_store_document_dedupes_on_content_hash(
 ):
     # Two distinct documents (different ids) sharing a content_hash: the second is a no-op because
     # DocStore.exists matches on content_hash.
-    doc1 = DocumentDTO(uuid4(), "first.txt", "same-hash", _FORTY_WORDS, await tenant(), {})
-    doc2 = DocumentDTO(uuid4(), "second.txt", "same-hash", _FORTY_WORDS, await tenant(), {})
+    doc1 = DocumentDTO(
+        uuid4(), "first.txt", "same-hash", _FORTY_WORDS, await tenant(), {}
+    )
+    doc2 = DocumentDTO(
+        uuid4(), "second.txt", "same-hash", _FORTY_WORDS, await tenant(), {}
+    )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
@@ -114,7 +115,7 @@ async def test_store_document_dedupes_on_content_hash(
 
 
 async def test_store_document_rejects_whitespace_only(
-        doc_store,
+    doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
@@ -123,7 +124,9 @@ async def test_store_document_rejects_whitespace_only(
     tenant,
     db_tests,
 ):
-    doc = DocumentDTO(uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", await tenant(), {})
+    doc = DocumentDTO(
+        uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", await tenant(), {}
+    )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
@@ -133,7 +136,7 @@ async def test_store_document_rejects_whitespace_only(
 
 
 async def test_remove_document(
-        doc_store,
+    doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
@@ -142,7 +145,9 @@ async def test_remove_document(
     tenant,
     new_session,
 ):
-    doc = DocumentDTO(uuid4(), "first.txt", "hash-of-the-file", _FORTY_WORDS, await tenant(), {})
+    doc = DocumentDTO(
+        uuid4(), "first.txt", "hash-of-the-file", _FORTY_WORDS, await tenant(), {}
+    )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
@@ -168,7 +173,7 @@ async def test_remove_document(
 
 
 async def test_get_stored_documents_ids(
-        doc_store,
+    doc_store,
     chunk_store,
     vec_store,
     fake_embedder,
@@ -184,7 +189,14 @@ async def test_get_stored_documents_ids(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     docs_info = [
-        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), await tenant(), {})
+        (
+            uuid4(),
+            f"file-{i}.txt",
+            f"hash-{i}",
+            _FORTY_WORDS + str(i),
+            await tenant(),
+            {},
+        )
         for i in range(4)
     ]
     docs = [DocumentDTO(id, n, h, c, t, m) for id, n, h, c, t, m in docs_info]
@@ -215,7 +227,14 @@ async def test_get_stored_documents_full_info(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
     )
     docs_info = [
-        (uuid4(), f"file-{i}.txt", f"hash-{i}", _FORTY_WORDS + str(i), await tenant(), {})
+        (
+            uuid4(),
+            f"file-{i}.txt",
+            f"hash-{i}",
+            _FORTY_WORDS + str(i),
+            await tenant(),
+            {},
+        )
         for i in range(4)
     ]
     docs = [DocumentDTO(id, n, h, c, t, m) for id, n, h, c, t, m in docs_info]

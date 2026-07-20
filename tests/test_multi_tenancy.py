@@ -6,33 +6,33 @@ from uuid import uuid4
 import pytest
 from rag_app.exceptions import DocumentExists
 
-def _make_ingestor(
-    doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
-):
-    chunker = Chunker(fake_tokenizer, 20, 5)
-    return IngestionService(
-        doc_store, chunk_store, vec_store, fake_embedder, chunker
-    )
 
-def _make_retriever(
-    doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
-):
+def _make_ingestor(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer):
     chunker = Chunker(fake_tokenizer, 20, 5)
-    return RetrievalService(
-        chunk_store, vec_store, doc_store, fake_embedder, chunker
-    )
+    return IngestionService(doc_store, chunk_store, vec_store, fake_embedder, chunker)
+
+
+def _make_retriever(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer):
+    chunker = Chunker(fake_tokenizer, 20, 5)
+    return RetrievalService(chunk_store, vec_store, doc_store, fake_embedder, chunker)
+
 
 async def test_A_stores_B_reads_nothing(
-        app_session, 
-        tenant, 
-        doc_store, 
-        chunk_store, 
-        vec_store, 
-        fake_embedder, 
-        fake_tokenizer, 
-        db_tests):
-    ingestor = _make_ingestor(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
-    retriever = _make_retriever(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
+    app_session,
+    tenant,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+):
+    ingestor = _make_ingestor(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    retriever = _make_retriever(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
 
     doc_tenant_A = DocumentDTO(
         uuid4(),
@@ -50,16 +50,21 @@ async def test_A_stores_B_reads_nothing(
 
 
 async def test_A_B_stores_A_reads(
-        app_session, 
-        tenant, 
-        doc_store, 
-        chunk_store, 
-        vec_store, 
-        fake_embedder, 
-        fake_tokenizer, 
-        db_tests):
-    ingestor = _make_ingestor(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
-    retriever = _make_retriever(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
+    app_session,
+    tenant,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+):
+    ingestor = _make_ingestor(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    retriever = _make_retriever(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
 
     doc_tenant_A = DocumentDTO(
         uuid4(),
@@ -99,20 +104,24 @@ async def test_A_B_stores_A_reads(
         assert ret_doc.owner_id == doc_tenant_B.owner_id
         assert ret_doc.doc_metadata == doc_tenant_B.doc_metadata
         assert await retriever.get_stored_documents_ids(s) == [doc_tenant_B.id]
-    
 
 
 async def test_A_stores_no_owner_reads(
-        app_session, 
-        tenant, 
-        doc_store, 
-        chunk_store, 
-        vec_store, 
-        fake_embedder, 
-        fake_tokenizer, 
-        db_tests):
-    ingestor = _make_ingestor(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
-    retriever = _make_retriever(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
+    app_session,
+    tenant,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+):
+    ingestor = _make_ingestor(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
+    retriever = _make_retriever(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
 
     doc_tenant_A = DocumentDTO(
         uuid4(),
@@ -128,16 +137,20 @@ async def test_A_stores_no_owner_reads(
     async with app_session() as s:
         assert await retriever.get_stored_documents_ids(s) == []
 
+
 async def test_dedup_on_content_and_owner(
-        app_session, 
-        tenant, 
-        doc_store, 
-        chunk_store, 
-        vec_store, 
-        fake_embedder, 
-        fake_tokenizer, 
-        db_tests):
-    ingestor = _make_ingestor(doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer)
+    app_session,
+    tenant,
+    doc_store,
+    chunk_store,
+    vec_store,
+    fake_embedder,
+    fake_tokenizer,
+    db_tests,
+):
+    ingestor = _make_ingestor(
+        doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
+    )
 
     doc_tenant_A = DocumentDTO(
         uuid4(),
@@ -165,10 +178,9 @@ async def test_dedup_on_content_and_owner(
     )
     async with app_session(doc_tenant_A.owner_id) as s:
         await ingestor.store_document(s, doc_tenant_A)
-    
+
     async with app_session(doc_tenant_B.owner_id) as s:
         await ingestor.store_document(s, doc_tenant_B)
-
 
     with pytest.raises(DocumentExists):
         async with app_session(doc_tenant_A_dup.owner_id) as s:
