@@ -20,7 +20,7 @@ class DocStore:
                 content=document.content,
                 content_hash=document.content_hash,
                 doc_metadata=document.doc_metadata,
-                owner_id=document.owner_id
+                owner_id=document.owner_id,
             )
         )
 
@@ -34,7 +34,7 @@ class DocStore:
             content_hash=doc.content_hash,
             content=doc.content,
             doc_metadata=doc.doc_metadata,
-            owner_id=doc.owner_id
+            owner_id=doc.owner_id,
         )
 
     async def get_document_content(self, session: AsyncSession, id: UUID) -> str:
@@ -46,7 +46,9 @@ class DocStore:
     async def get_stored_documents(
         self, session: AsyncSession
     ) -> Sequence[DocumentDTO]:
-        result = await session.execute(select(Document.id, Document.filename, Document.doc_metadata))
+        result = await session.execute(
+            select(Document.id, Document.filename, Document.doc_metadata)
+        )
         return [
             DocumentDTO(row.id, row.filename, "", "", uuid4(), row.doc_metadata)
             for row in result.all()

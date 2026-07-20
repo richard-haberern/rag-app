@@ -4,6 +4,7 @@ from rag_app.llm.prompter import build_prompt
 from rag_app.services.retriever import RetrievalService
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 class AnswerService:
     # DI
     def __init__(self, llm_client: LLMClient, retriever: RetrievalService) -> None:
@@ -11,7 +12,11 @@ class AnswerService:
         self.retriever = retriever
 
     async def get_answer(
-        self, session: AsyncSession, query: str, k: int | None = None, threshold: float | None = None
+        self,
+        session: AsyncSession,
+        query: str,
+        k: int | None = None,
+        threshold: float | None = None,
     ) -> str:
         # here we have to give answer if the context window is empty
         if k is None:

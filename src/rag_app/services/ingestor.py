@@ -29,7 +29,9 @@ class IngestionService:
         self.embedder = embedder
         self.chunker = chunker
 
-    async def store_document(self, session: AsyncSession, document: DocumentDTO) -> None:
+    async def store_document(
+        self, session: AsyncSession, document: DocumentDTO
+    ) -> None:
         if await self.doc_store.exists(session, document):
             raise DocumentExists()
         if not document.content or not re.search(r"\w", document.content):

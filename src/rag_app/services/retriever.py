@@ -41,7 +41,7 @@ class RetrievalService:
                 f"Your query is too long {q_size}, max size for query is {self.chunker.max_size}"
             )
         q_vector: list[float] = self.embedder.embed_query(query)[0]
-        
+
         k_vectors = await self.vec_store.search(session, q_vector, k, threshold)
         k_chunks = await self.chunk_store.get_chunks_by_ids(
             session, [ch_id for ch_id, _ in k_vectors]
@@ -59,8 +59,14 @@ class RetrievalService:
     async def get_document(self, session: AsyncSession, id: UUID) -> DocumentDTO:
         return await self.doc_store.get_document(session, id)
 
-    async def get_stored_documents_ids(self, session: AsyncSession,) -> Sequence[UUID]:
+    async def get_stored_documents_ids(
+        self,
+        session: AsyncSession,
+    ) -> Sequence[UUID]:
         return await self.doc_store.get_stored_documents_ids(session)
 
-    async def get_stored_documents_DTOs(self, session: AsyncSession,) -> Sequence[DocumentDTO]:
+    async def get_stored_documents_DTOs(
+        self,
+        session: AsyncSession,
+    ) -> Sequence[DocumentDTO]:
         return await self.doc_store.get_stored_documents(session)
