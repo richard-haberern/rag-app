@@ -15,3 +15,4 @@ Dockerfile
 *.md
 TODO.txt
 .github/
+functions.sql
