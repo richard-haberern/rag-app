@@ -1,0 +1,17 @@
+name: cleanup
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"   # 03:00 UTC on the 1st of every month
+  workflow_dispatch:        # manual trigger
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call cleanup endpoint
+        run: |
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "sweep-token: ${{ secrets.SWEEP_TOKEN }}" \
+            https://haberric-rag-app-v1.hf.space/admin/cleanup
