@@ -16,6 +16,7 @@ Revises:
 Create Date: 2026-07-11 12:16:03.869090
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -25,7 +26,7 @@ from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
-revision: str = '2b535d2f1f1d'
+revision: str = "2b535d2f1f1d"
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -73,7 +74,9 @@ def upgrade() -> None:
         sa.Column("document_id", sa.Uuid(), nullable=False),
         sa.ForeignKeyConstraint(["document_id"], ["documents.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("document_id", "position", name="uq_chunk_document_position"),
+        sa.UniqueConstraint(
+            "document_id", "position", name="uq_chunk_document_position"
+        ),
     )
     # FK columns are not auto-indexed; the chunks RLS subselect and the cascade delete both
     # scan document_id.
