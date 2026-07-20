@@ -25,7 +25,9 @@ class ChunkDTO:
     document_id: UUID
     position: int
 
+
 @dataclass(frozen=True, slots=True)
-class UserDTO:
+class OwnerDTO:
     id: UUID
     created_at: datetime
+    expires_at: datetime

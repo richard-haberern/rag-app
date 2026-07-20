@@ -5,30 +5,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 from datetime import timedelta
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # DB connection: only DB_PASSWORD is required; the rest default to the local dev
-    # container. Kept optional so models (which only need embed_dim) import without it.
-    # If we need just the embed_dim etc. and don't want to do anything with the database
-    # no need for password
-    db_user: str | None = None
-    db_password: str | None = None
-    db_password_test: str | None = None
-    db_host: str = "localhost"
-    db_port: int = 5432
-    db_name: str | None = None
-    db_name_test: str | None = None
-    test_database_url: str | None = None
-    # Optional full override; if set, takes precedence over the DB_* parts above.
-    # DATABASE_URL is the OWNER connection (raguser): used by Alembic for DDL/GRANTs.
     database_url: str | None = None
-    # APP_DATABASE_URL is the least-privilege app_user connection used by the running app,
-    # so RLS actually applies (a superuser/owner connection would bypass it). Full URL only.
     app_database_url: str | None = None
-    # app_user connection to rag_test, for fixtures that need RLS actually enforced (raguser
-    # is a superuser and bypasses it). Full URL only, mirroring app_database_url.
-    app_database_url_test: str | None = None
+
+    test_database_url: str | None = None
+    test_app_database_url: str | None = None
     # asyncpg SSL toggle. Off for local/CI/test Postgres (no TLS); Neon and other
     # managed Postgres require it, so the deploy env sets DB_SSL=true.
     db_ssl: bool = False
@@ -62,55 +47,43 @@ class Settings(BaseSettings):
     static_dir: str = str(Path(__file__).resolve().parents[2] / "static")
 
     secure: bool = False
-    secret_key: list[str] | None = None
     # Anonymous-tenant identity lifetime. TTL is the server-side data-retention window (a
     # user row and its documents survive this long); cookie_expire is the browser cookie's
     # max_age in seconds. Keep them aligned so the cookie and the data expire together.
     TTL: timedelta = timedelta(days=30)
     cookie_expire: int = int(timedelta(days=30).total_seconds())
 
-    @property
-    def app_sqlalchemy_url(self) -> str:
-        if self.app_database_url is None:
-            raise ValueError("APP_DATABASE_URL is required to build the app_user database URL")
-        return self.app_database_url
-
-    @property
-    def app_sqlalchemy_url_test(self) -> str:
-        if self.app_database_url_test is None:
-            raise ValueError(
-                "APP_DATABASE_URL_TEST is required to build the app_user test database URL"
-            )
-        return self.app_database_url_test
+    sweep_token: str | None = None
 
     @property
     def sqlalchemy_url(self) -> str:
-        if self.database_url:
-            return self.database_url
-        if self.db_password is None:
-            raise ValueError("DB_PASSWORD is required to build the database URL")
-        return (
-            f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
-        )
+        if self.database_url is None:
+            raise ValueError("DATABASE_URL has to be set to connect to the database")
+        return self.database_url
 
     @property
-    def sqlalchemy_url_test(self) -> str:
-        # Deliberately ignores database_url: the test URL must be built from the
-        # explicit DB_*_TEST parts so the suite's TRUNCATE/DROP can never alias prod
-        # via a stray DATABASE_URL. (Flag for DECISIONS.md.)
-        if self.test_database_url:
-            return self.test_database_url
-        if self.db_password_test is None:
+    def test_sqlalchemy_url(self) -> str:
+        if self.test_database_url is None:
             raise ValueError(
-                "DB_PASSWORD_TEST is required to build the test database URL"
+                "TEST_DATABASE_URL has to be set to connect to the database"
             )
-        if self.db_name_test is None:
-            raise ValueError("DB_NAME_TEST is required to build the test database URL")
-        return (
-            f"postgresql+asyncpg://{self.db_user}:{self.db_password_test}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name_test}"
-        )
+        return self.test_database_url
+
+    @property
+    def app_sqlalchemy_url(self) -> str:
+        if self.app_database_url is None:
+            raise ValueError(
+                "APP_DATABASE_URL is required to build the app_user database URL"
+            )
+        return self.app_database_url
+
+    @property
+    def test_app_sqlalchemy_url(self) -> str:
+        if self.test_app_database_url is None:
+            raise ValueError(
+                "APP_DATABASE_URL_TEST is required to build the app_user test database URL"
+            )
+        return self.test_app_database_url
 
 
 @lru_cache
