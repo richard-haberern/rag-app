@@ -244,7 +244,7 @@ def upgrade() -> None:
         SECURITY DEFINER
         SET search_path = ''
         AS $$
-            DELETE FROM public.owners AS o WHERE o.owner_id=p_owner_id
+            DELETE FROM public.owners AS o WHERE o.id=p_owner_id
         $$;"""
     )
     op.execute(
