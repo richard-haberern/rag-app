@@ -19,7 +19,7 @@ def _make_retriever(doc_store, chunk_store, vec_store, fake_embedder, fake_token
 
 async def test_A_stores_B_reads_nothing(
     app_session,
-    tenant,
+    anonymous,
     doc_store,
     chunk_store,
     vec_store,
@@ -39,19 +39,19 @@ async def test_A_stores_B_reads_nothing(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     async with app_session(doc_tenant_A.owner_id) as s:
         await ingestor.store_document(s, doc_tenant_A)
-    tenant_B = await tenant()
+    tenant_B = (await anonymous()).owner_id
     async with app_session(tenant_B) as s:
         assert await retriever.get_stored_documents_ids(s) == []
 
 
 async def test_A_B_stores_A_reads(
     app_session,
-    tenant,
+    anonymous,
     doc_store,
     chunk_store,
     vec_store,
@@ -71,7 +71,7 @@ async def test_A_B_stores_A_reads(
         "file1.txt",
         "0123456789abcde",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     doc_tenant_B = DocumentDTO(
@@ -79,7 +79,7 @@ async def test_A_B_stores_A_reads(
         "file1.txt",
         "0123456789abcdefgh",
         "some amazing content in the file that should be different",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "legendario", "size": 123},
     )
     async with app_session(doc_tenant_A.owner_id) as s:
@@ -108,7 +108,7 @@ async def test_A_B_stores_A_reads(
 
 async def test_A_stores_no_owner_reads(
     app_session,
-    tenant,
+    anonymous,
     doc_store,
     chunk_store,
     vec_store,
@@ -128,7 +128,7 @@ async def test_A_stores_no_owner_reads(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     async with app_session(doc_tenant_A.owner_id) as s:
@@ -140,7 +140,7 @@ async def test_A_stores_no_owner_reads(
 
 async def test_dedup_on_content_and_owner(
     app_session,
-    tenant,
+    anonymous,
     doc_store,
     chunk_store,
     vec_store,
@@ -157,7 +157,7 @@ async def test_dedup_on_content_and_owner(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     doc_tenant_B = DocumentDTO(
@@ -165,7 +165,7 @@ async def test_dedup_on_content_and_owner(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     doc_tenant_A_dup = DocumentDTO(

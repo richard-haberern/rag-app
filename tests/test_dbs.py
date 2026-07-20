@@ -4,13 +4,15 @@ from rag_app.exceptions import DocumentNotFound, ChunkNotFound, VectorNotFound
 from uuid import uuid4
 
 
-async def test_doc_store_roundtrip(doc_store, session, new_session, tenant, db_tests):
+async def test_doc_store_roundtrip(
+    doc_store, session, new_session, anonymous, db_tests
+):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -31,13 +33,13 @@ async def test_doc_store_get_non_existing(doc_store, session, db_tests):
         await doc_store.get_document(session, uuid4())
 
 
-async def test_doc_store_remove(doc_store, session, new_session, tenant, db_tests):
+async def test_doc_store_remove(doc_store, session, new_session, anonymous, db_tests):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -48,13 +50,13 @@ async def test_doc_store_remove(doc_store, session, new_session, tenant, db_test
             await doc_store.get_document(s2, doc.id)
 
 
-async def test_doc_store_exists(doc_store, session, new_session, tenant, db_tests):
+async def test_doc_store_exists(doc_store, session, new_session, anonymous, db_tests):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -68,21 +70,21 @@ async def test_doc_store_exists(doc_store, session, new_session, tenant, db_test
                 "file1.txt",
                 "0123456789abcdefgh",
                 "some amazing content in the file",
-                await tenant(),
+                (await anonymous()).owner_id,
                 {"creator": "assasino", "size": 100},
             ),
         )
 
 
 async def test_chunk_store_roundtrip_by_ids(
-    chunk_store, doc_store, session, new_session, tenant, db_tests
+    chunk_store, doc_store, session, new_session, anonymous, db_tests
 ):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -114,14 +116,14 @@ async def test_chunk_store_roundtrip_by_ids(
 
 
 async def test_chunk_store_roundtrip_by_doc_id(
-    chunk_store, doc_store, new_session, session, tenant, db_tests
+    chunk_store, doc_store, new_session, session, anonymous, db_tests
 ):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -156,14 +158,14 @@ async def test_chunk_store_no_chunks_doc_id_exception(chunk_store, session, db_t
 
 
 async def test_vec_store_one_vector_roundtrip(
-    vec_store, doc_store, chunk_store, fake_embedder, session, tenant, db_tests
+    vec_store, doc_store, chunk_store, fake_embedder, session, anonymous, db_tests
 ):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -186,14 +188,14 @@ async def test_vec_store_one_vector_roundtrip(
 
 
 async def test_vec_store_vectors_roundtrip(
-    vec_store, doc_store, chunk_store, fake_embedder, session, tenant, db_tests
+    vec_store, doc_store, chunk_store, fake_embedder, session, anonymous, db_tests
 ):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -224,14 +226,14 @@ async def test_vec_store_vectors_roundtrip(
 
 
 async def test_vec_store_wrong_dim(
-    vec_store, doc_store, chunk_store, session, tenant, db_tests
+    vec_store, doc_store, chunk_store, session, anonymous, db_tests
 ):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -250,14 +252,14 @@ async def test_vec_store_wrong_dim(
 
 
 async def test_vec_store_get_values_by_chunk_id_eror(
-    vec_store, doc_store, chunk_store, fake_embedder, session, tenant, db_tests
+    vec_store, doc_store, chunk_store, fake_embedder, session, anonymous, db_tests
 ):
     doc = DocumentDTO(
         uuid4(),
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -287,7 +289,7 @@ async def test_vec_store_search(
     fake_embedder,
     session,
     db_tests,
-    tenant,
+    anonymous,
     settings_session,
 ):
     doc = DocumentDTO(
@@ -295,7 +297,7 @@ async def test_vec_store_search(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -351,7 +353,7 @@ async def test_vec_store_search_k_bigger_than_db_records(
     fake_embedder,
     session,
     db_tests,
-    tenant,
+    anonymous,
     settings_session,
 ):
     doc = DocumentDTO(
@@ -359,7 +361,7 @@ async def test_vec_store_search_k_bigger_than_db_records(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)
@@ -409,7 +411,7 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     fake_embedder,
     session,
     new_session,
-    tenant,
+    anonymous,
     db_tests,
 ):
     # FK ON DELETE CASCADE (+ passive_deletes) means deleting the document removes its chunks, and
@@ -419,7 +421,7 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
         "file1.txt",
         "hash-cascade",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {},
     )
     await doc_store.add_document(session, doc)
@@ -447,7 +449,7 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
 
 
 async def test_vector_store_threshold(
-    vec_store, doc_store, chunk_store, session, db_tests, tenant, settings_session
+    vec_store, doc_store, chunk_store, session, db_tests, anonymous, settings_session
 ):
 
     doc = DocumentDTO(
@@ -455,7 +457,7 @@ async def test_vector_store_threshold(
         "file1.txt",
         "0123456789abcdef",
         "some amazing content in the file",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
     await doc_store.add_document(session, doc)

@@ -41,7 +41,7 @@ async def test_store_document_persists_doc_chunks_vectors(
     fake_embedder,
     fake_tokenizer,
     new_session,
-    tenant,
+    anonymous,
     db_tests,
 ):
     doc = DocumentDTO(
@@ -49,7 +49,7 @@ async def test_store_document_persists_doc_chunks_vectors(
         "doc.txt",
         "hash-it",
         _FORTY_WORDS,
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "ambulance"},
     )
     ingestor = _make_ingestor(
@@ -82,16 +82,26 @@ async def test_store_document_dedupes_on_content_hash(
     fake_embedder,
     fake_tokenizer,
     new_session,
-    tenant,
+    anonymous,
     db_tests,
 ):
     # Two distinct documents (different ids) sharing a content_hash: the second is a no-op because
     # DocStore.exists matches on content_hash.
     doc1 = DocumentDTO(
-        uuid4(), "first.txt", "same-hash", _FORTY_WORDS, await tenant(), {}
+        uuid4(),
+        "first.txt",
+        "same-hash",
+        _FORTY_WORDS,
+        (await anonymous()).owner_id,
+        {},
     )
     doc2 = DocumentDTO(
-        uuid4(), "second.txt", "same-hash", _FORTY_WORDS, await tenant(), {}
+        uuid4(),
+        "second.txt",
+        "same-hash",
+        _FORTY_WORDS,
+        (await anonymous()).owner_id,
+        {},
     )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
@@ -121,11 +131,16 @@ async def test_store_document_rejects_whitespace_only(
     fake_embedder,
     fake_tokenizer,
     new_session,
-    tenant,
+    anonymous,
     db_tests,
 ):
     doc = DocumentDTO(
-        uuid4(), "blank.txt", "hash-blank", "   \n\t \v \n", await tenant(), {}
+        uuid4(),
+        "blank.txt",
+        "hash-blank",
+        "   \n\t \v \n",
+        (await anonymous()).owner_id,
+        {},
     )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
@@ -142,11 +157,16 @@ async def test_remove_document(
     fake_embedder,
     fake_tokenizer,
     db_tests,
-    tenant,
+    anonymous,
     new_session,
 ):
     doc = DocumentDTO(
-        uuid4(), "first.txt", "hash-of-the-file", _FORTY_WORDS, await tenant(), {}
+        uuid4(),
+        "first.txt",
+        "hash-of-the-file",
+        _FORTY_WORDS,
+        (await anonymous()).owner_id,
+        {},
     )
     ingestor = _make_ingestor(
         doc_store, chunk_store, vec_store, fake_embedder, fake_tokenizer
@@ -179,7 +199,7 @@ async def test_get_stored_documents_ids(
     fake_embedder,
     fake_tokenizer,
     db_tests,
-    tenant,
+    anonymous,
     new_session,
 ):
     ingestor = _make_ingestor(
@@ -194,7 +214,7 @@ async def test_get_stored_documents_ids(
             f"file-{i}.txt",
             f"hash-{i}",
             _FORTY_WORDS + str(i),
-            await tenant(),
+            (await anonymous()).owner_id,
             {},
         )
         for i in range(4)
@@ -217,7 +237,7 @@ async def test_get_stored_documents_full_info(
     fake_embedder,
     fake_tokenizer,
     db_tests,
-    tenant,
+    anonymous,
     new_session,
 ):
     ingestor = _make_ingestor(
@@ -232,7 +252,7 @@ async def test_get_stored_documents_full_info(
             f"file-{i}.txt",
             f"hash-{i}",
             _FORTY_WORDS + str(i),
-            await tenant(),
+            (await anonymous()).owner_id,
             {},
         )
         for i in range(4)

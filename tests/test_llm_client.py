@@ -43,7 +43,7 @@ async def test_e2e(
     new_session,
     db_tests,
     settings,
-    tenant,
+    anonymous,
     tmp_path,
 ):
     f = tmp_path / "doc.txt"
@@ -65,7 +65,7 @@ async def test_e2e(
         "doc.txt",
         str(f),
         "0123456789abcdef",
-        await tenant(),
+        (await anonymous()).owner_id,
         {"creator": "assasino", "size": 100},
     )
 

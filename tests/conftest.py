@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 import pytest
@@ -9,8 +10,24 @@ from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.config import Settings
+
+# Reuse the app's own crypto helpers so tests hash tokens/passwords exactly as
+# production does -- one source of truth, no chance of the test path drifting.
+from rag_app.api._helpers import _hash_token, _get_new_token, _hash_password
 from tests.fakes import FakeTokenizer, FakeEmbedder, make_mock_llm_client
 from contextlib import asynccontextmanager
+
+
+@dataclass(frozen=True)
+class Identity:
+    """A test tenant: the owner_id RLS scopes on, plus the raw (unhashed) session
+    token -- usable as the `session_token` cookie value if HTTP tests are added
+    later. `username`/`password` are set only for logged-in identities."""
+
+    owner_id: UUID
+    token: str
+    username: str | None = None
+    password: str | None = None
 
 
 @pytest.fixture(scope="session")
@@ -50,7 +67,6 @@ def doc_store():
 @pytest.fixture
 def chunk_store():
     return ChunkStore()
-
 
 
 # The vector store is now stateless: it takes a caller-owned session per method,
@@ -163,18 +179,88 @@ def app_session(app_engine):
     return _make
 
 
-@pytest.fixture
-def tenant(app_session, user_store):
-    """Factory: each call mints one fresh users row via UserStore.add_user in its own
-    (no-owner) transaction -- api/_helpers.py's _mint, minus the cookie. Call it more
-    than once per test for distinct tenants, e.g.
-    `owner_a, owner_b = await tenant(), await tenant()`, to test cross-tenant
-    isolation."""
+# --- Identity factories: mint a real owner (+ session) through the same SQL auth
+# functions the endpoints use, so FK constraints, RLS and session validation behave
+# exactly like production. Each returns an async factory; call it more than once per
+# test for distinct tenants, e.g. `a, b = await anonymous(), await anonymous()`.
 
-    async def _make() -> UUID:
-        new_id = uuid4()
+
+@pytest.fixture
+def anonymous(app_session):
+    """Factory for an anonymous tenant: owner (expires_at = now()+30d) + session, no
+    users row. Mirrors POST /anonymous_login. Runs via an app_user transaction with no
+    owner GUC; anonymous_mint is SECURITY DEFINER so it can still write owners/sessions."""
+
+    async def _make() -> Identity:
+        token = _get_new_token()
         async with app_session() as s:
-            await user_store.add_user(s, new_id)
-        return new_id
+            res = await s.execute(
+                text("SELECT public.anonymous_mint(:token_hash)"),
+                {"token_hash": _hash_token(token)},
+            )
+            owner_id = res.scalar_one()
+        return Identity(owner_id=owner_id, token=token)
+
+    return _make
+
+
+@pytest.fixture
+def logged_in(app_session):
+    """Factory for a registered tenant: owner (expires_at NULL) + users row + login
+    session. Mirrors POST /register followed by POST /login. Username defaults to a
+    unique value; override username/password to test specific-credential flows."""
+
+    async def _make(
+        username: str | None = None, password: str = "test-password-123"
+    ) -> Identity:
+        username = username or f"user-{uuid4().hex[:12]}"
+        pw_hash = await _hash_password(password)
+        token = _get_new_token()
+        async with app_session() as s:
+            res = await s.execute(
+                text("SELECT public.registration(:username, :password_hash)"),
+                {"username": username, "password_hash": pw_hash},
+            )
+            owner_id = res.scalar_one()  # None only if username already taken
+            await s.execute(
+                text("SELECT public.create_session_login(:token_hash, :owner_id)"),
+                {"token_hash": _hash_token(token), "owner_id": owner_id},
+            )
+        return Identity(
+            owner_id=owner_id, token=token, username=username, password=password
+        )
+
+    return _make
+
+
+@pytest.fixture
+def expired_session(session):
+    """Factory for an owner whose session is already expired. No SQL function mints an
+    expired session, so this INSERTs directly with a past expires_at via the superuser
+    `session` (app_user has no direct write on owners/sessions). Use it to test that
+    validate_session rejects expired sessions and that sweep_sessions removes them.
+    Pass owner_expired=True to also backdate the owner so sweep_owners collects it."""
+
+    async def _make(owner_expired: bool = False) -> Identity:
+        token = _get_new_token()
+        # Fixed literal chosen in code, never caller input -- no injection surface.
+        owner_expires = (
+            "pg_catalog.now() - interval '1 day'" if owner_expired else "NULL"
+        )
+        res = await session.execute(
+            text(
+                f"INSERT INTO owners (expires_at) VALUES ({owner_expires}) RETURNING id"
+            )
+        )
+        owner_id = res.scalar_one()
+        await session.execute(
+            text(
+                "INSERT INTO sessions (token_hash, owner_id, expires_at) "
+                "VALUES (:h, :oid, pg_catalog.now() - interval '1 day')"
+            ),
+            {"h": _hash_token(token), "oid": owner_id},
+        )
+        await session.commit()
+        return Identity(owner_id=owner_id, token=token)
 
     return _make
