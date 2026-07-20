@@ -17,8 +17,8 @@ def get_health_info() -> str:
 @router.post("/admin/cleanup")
 async def cleanup(
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
-    sweep_token: Annotated[str | None, Header(alias="sweep-token")] = None
-    ) -> None:
+    sweep_token: Annotated[str | None, Header(alias="sweep-token")] = None,
+) -> None:
     secret_token = get_settings().sweep_token
     # Any auth failure — server misconfig, missing header, or mismatch — returns the same
     # 404 so the endpoint is indistinguishable from a non-route to an unauthenticated probe.
@@ -28,5 +28,3 @@ async def cleanup(
         raise HTTPException(status_code=404)
     await db_session.execute(text("SELECT public.sweep_owners()"))
     await db_session.execute(text("SELECT public.sweep_sessions()"))
-
-

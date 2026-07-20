@@ -30,4 +30,5 @@ class ChunkDTO:
 class OwnerDTO:
     id: UUID
     created_at: datetime
-    expires_at: datetime
+    # nullable in the DB: registered users have NULL; only anonymous mints set it.
+    expires_at: datetime | None

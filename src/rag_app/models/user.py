@@ -5,7 +5,7 @@ from rag_app.db.base import Base
 from uuid import UUID
 
 
-from sqlalchemy import func, ForeignKey
+from sqlalchemy import func, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -15,7 +15,7 @@ class User(Base):
         ForeignKey("owners.id", ondelete="CASCADE"), primary_key=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     password_hash: Mapped[str] = mapped_column(nullable=False)
     username: Mapped[str] = mapped_column(unique=True, nullable=False)

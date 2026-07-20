@@ -34,7 +34,7 @@ class Document(Base):
     doc_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, default=dict
     )
-    # Tenant owner. FK -> users.id ON DELETE CASCADE is what makes the sweep purge a user's
+    # Tenant owner. FK -> owners.id ON DELETE CASCADE is what makes the sweep purge a user's
     # documents (and, in turn, their chunks/vectors); the cascade is an FK action, so it runs
     # even though RLS/FORCE is on. Indexed: the documents RLS policy and the cascade scan it.
     owner_id: Mapped[UUID] = mapped_column(
