@@ -45,7 +45,7 @@ jobs:
       # Same command the app itself runs before serving (see docker-compose.yaml's api
       # service / README) -- test schema (incl. RLS/policies/grants) now matches prod
       # exactly instead of a separate create_all path.
-      run: DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD_TEST}@${DB_HOST}:${DB_PORT}/${DB_NAME_TEST}" alembic upgrade head
+      run: DATABASE_URL="postgresql+asyncpg://raguser:testpassword@$localhost:5432/rag_test" alembic upgrade head
     - name: Lint with ruff
       run: |
         ruff check ./src
