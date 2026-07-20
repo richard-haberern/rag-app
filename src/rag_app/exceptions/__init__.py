@@ -38,6 +38,21 @@ class QueryTooLong(RagError):
     default_message = "The query length was too long."
 
 
+class UsernameAlreadyExists(RagError):
+    status_code = 409
+    default_message = "Username already exists."
+
+
+class LoginUnsuccessful(RagError):
+    status_code = 401
+    default_message = "The login wasn't successful."
+
+
+class InvalidSession(RagError):
+    status_code = 401
+    default_message = "The session is invalid."
+
+
 # --- Internal invariant violations (5xx) ------------------------------------
 class InternalError(AppError):
     status_code = 500
@@ -47,8 +62,10 @@ class InternalError(AppError):
 class ChunkNotFound(InternalError):
     default_message = "Chunk wasn't found."
 
-class UserNotFound(InternalError):
+
+class OwnerNotFound(InternalError):
     default_message = "User wasn't found."
+
 
 class VectorNotFound(InternalError):
     default_message = "Vector wasn't found."
