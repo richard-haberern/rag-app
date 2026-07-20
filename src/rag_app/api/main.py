@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from httpx import AsyncClient
 
-from rag_app.api.routes import ingest, query, dev
+from rag_app.api.routes import ingest, query, dev, auth
 from rag_app.chunkings.factory import build_chunker
 from rag_app.db.engine import make_engine, make_sessionmaker
 from rag_app.embeddings.embedder import Embedder
@@ -19,7 +19,7 @@ from rag_app.stores.document_store import DocStore
 from rag_app.config import get_settings
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import AppError
-from rag_app.stores.users_store import UserStore
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -36,7 +36,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.chunk_store = ChunkStore()
     app.state.doc_store = DocStore()
     app.state.vec_store = PgVectorStore()
-    app.state.user_store = UserStore()
     app.state.ingestor = IngestionService(
         app.state.doc_store,
         app.state.chunk_store,
@@ -66,6 +65,7 @@ app = FastAPI(
 )
 app.include_router(ingest.router)
 app.include_router(query.router)
+app.include_router(auth.router)
 app.include_router(dev.router)
 
 # Static frontend (homepage + demo). Mounted at "/" but registered AFTER the routers

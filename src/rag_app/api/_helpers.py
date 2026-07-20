@@ -1,61 +1,51 @@
-from fastapi import Request, Response
-from itsdangerous import Signer
-from random import random
-from uuid import uuid4, UUID
+from uuid import UUID
+from secrets import token_urlsafe
 
-from sqlalchemy import select, delete, and_, func
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from hashlib import sha256
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+from fastapi.concurrency import run_in_threadpool
 
-from rag_app.config import get_settings
-from rag_app.models import User
+_ph = PasswordHasher()
+
+# Precomputed once at import so a login against a nonexistent username can still pay the
+# same argon2 verification cost as a real one — closes the timing side-channel for user
+# enumeration. The value is irrelevant; only that verifying against it takes as long.
+_DUMMY_HASH = _ph.hash("dummy_password_for_constant_time_login")
 
 
-def _signer() -> Signer:
-    key = get_settings().secret_key
-    if key is None:
-        raise ValueError("Secret Key is missing.")
-    return Signer(key)
+def _hash_token(token: str) -> str:
+    return sha256(token.encode("utf-8")).hexdigest()
 
 
-async def _check_owner(session: AsyncSession, owner_id: UUID) -> bool:
-    """True if owner_id names a user that still exists and is within its TTL. The TTL check
-    uses the DB clock (func.now()) to avoid app/DB timezone skew; TTL is a timedelta and
-    renders as an interval."""
-    ttl = get_settings().TTL
-    res = await session.execute(
-        select(User.id).where(
-            and_(User.id == owner_id, func.now() < User.created_at + ttl)
-        )
+async def _hash_password(password: str) -> str:
+    # running it off the event-loop to not stall out other events.
+    # argon2 is on purpose CPU-heavy
+    return await run_in_threadpool(_ph.hash, password)
+
+
+async def _verify_password(password_hash: str, password: str) -> bool:
+    # Same off-loop offload as _hash_password. Returns False on any argon2 verification
+    # failure instead of raising, so callers branch on a plain bool.
+    def _verify() -> bool:
+        try:
+            return _ph.verify(password_hash, password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            return False
+
+    return await run_in_threadpool(_verify)
+
+
+async def _create_new_session(owner_id: UUID, db_session: AsyncSession) -> str:
+    token = _get_new_token()
+    await db_session.execute(
+        text("SELECT public.create_session_login(:token_hash, :owner_id)"),
+        {"token_hash": _hash_token(token), "owner_id": owner_id},
     )
-    return res.scalar_one_or_none() is not None
+    return token
 
 
-async def _sweep_db(request: Request) -> None:
-    """Delete users past their TTL. ON DELETE CASCADE from documents.owner_id purges their
-    documents (and, in turn, chunks/vectors) -- an FK cascade, so it runs regardless of RLS
-    even though this session has no app.owner_id set."""
-    ttl = get_settings().TTL
-    async with request.app.state.session_maker.begin() as s:
-        await s.execute(delete(User).where(User.created_at + ttl < func.now()))
-
-
-async def _mint(request: Request, response: Response) -> UUID:
-    """Create a fresh anonymous identity: (probabilistically) sweep, insert the users row in
-    its own committed transaction (so the later document insert's owner_id FK is satisfiable),
-    and set the signed cookie."""
-    if random() < 0.1:
-        await _sweep_db(request)
-
-    new_id = uuid4()
-    async with request.app.state.session_maker.begin() as s:
-        await request.app.state.user_store.add_user(s, new_id)
-
-    response.set_cookie(
-        "owner",
-        _signer().sign(str(new_id)).decode(),
-        max_age=get_settings().cookie_expire,
-        httponly=True,
-        samesite="lax",
-        secure=get_settings().secure,
-    )
-    return new_id
+def _get_new_token() -> str:
+    return token_urlsafe()

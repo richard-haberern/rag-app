@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import uuid4, UUID
 from hashlib import sha256
 
-from rag_app.api.deps import get_ingestor, set_guc_rw, require_owner
+from rag_app.api.deps import get_ingestor, set_guc, validate_session
 from rag_app.services.ingestor import IngestionService
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,8 +28,8 @@ router = APIRouter(prefix="/ingest")
 async def store_document(
     document: DocumentRequest,
     ingestor: Annotated[IngestionService, Depends(get_ingestor)],
-    session: Annotated[AsyncSession, Depends(set_guc_rw)],
-    owner_id: Annotated[UUID, Depends(require_owner)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
+    owner_id: Annotated[UUID, Depends(validate_session)],
 ) -> UUID:
     doc_id = uuid4()
     await ingestor.store_document(
@@ -40,8 +40,8 @@ async def store_document(
             content_hash=sha256(document.content.encode()).hexdigest(),
             content=document.content,
             doc_metadata=document.metadata,
-            owner_id=owner_id
-        )
+            owner_id=owner_id,
+        ),
     )
     return doc_id
 
@@ -50,6 +50,6 @@ async def store_document(
 async def remove_document(
     doc_id: UUID,
     ingestor: Annotated[IngestionService, Depends(get_ingestor)],
-    session: Annotated[AsyncSession, Depends(set_guc_rw)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> None:
     await ingestor.remove_document(session, doc_id)

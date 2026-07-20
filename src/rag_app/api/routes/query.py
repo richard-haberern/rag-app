@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from rag_app.api.deps import get_answerer, get_retriever, set_guc_ro
+from rag_app.api.deps import get_answerer, get_retriever, set_guc
 
 from rag_app.config import get_settings
 from rag_app.services.answerer import AnswerService
@@ -36,8 +36,9 @@ class GenerateRequest(BaseModel):
 
 @router.post("/generate")
 async def generate_answer(
-    q: GenerateRequest, answerer: Annotated[AnswerService, Depends(get_answerer)],
-    session: Annotated[AsyncSession, Depends(set_guc_ro)],
+    q: GenerateRequest,
+    answerer: Annotated[AnswerService, Depends(get_answerer)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> str:
     return await answerer.get_answer(session, q.query)
 
@@ -47,8 +48,9 @@ async def generate_answer(
 # similarity order (scores never cross the service boundary).
 @router.post("/retrieve")
 async def retrieve_chunks(
-    q: GenerateRequest, retriever: Annotated[RetrievalService, Depends(get_retriever)],
-    session: Annotated[AsyncSession, Depends(set_guc_ro)],
+    q: GenerateRequest,
+    retriever: Annotated[RetrievalService, Depends(get_retriever)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> list[str]:
     s = get_settings()
     return await retriever.search_topk_chunks(
@@ -58,8 +60,9 @@ async def retrieve_chunks(
 
 @router.get("/documents/{doc_id}")
 async def get_document(
-    doc_id: UUID, retriever: Annotated[RetrievalService, Depends(get_retriever)],
-    session: Annotated[AsyncSession, Depends(set_guc_ro)]
+    doc_id: UUID,
+    retriever: Annotated[RetrievalService, Depends(get_retriever)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> DocumentResponse:
     doc = await retriever.get_document(session, doc_id)
     return DocumentResponse(
@@ -73,7 +76,7 @@ async def get_document(
 @router.get("/stored_documents/ids")
 async def get_stored_documents_ids(
     retriever: Annotated[RetrievalService, Depends(get_retriever)],
-    session: Annotated[AsyncSession, Depends(set_guc_ro)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> Sequence[UUID]:
     return await retriever.get_stored_documents_ids(session)
 
@@ -81,7 +84,7 @@ async def get_stored_documents_ids(
 @router.get("/stored_documents/metadata")
 async def get_stored_documents_metadata(
     retriever: Annotated[RetrievalService, Depends(get_retriever)],
-    session: Annotated[AsyncSession, Depends(set_guc_ro)],
+    session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> Sequence[DocumentSummary]:
     docDTOs = await retriever.get_stored_documents_DTOs(session)
     return [
