@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy import ForeignKey, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from rag_app.db.base import Base
@@ -18,7 +18,9 @@ class Chunk(Base):
         UniqueConstraint("document_id", "position", name="uq_chunk_document_position"),
     )
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=func.gen_random_uuid()
+    )
     content: Mapped[str]
     position: Mapped[int]
     document_id: Mapped[UUID] = mapped_column(

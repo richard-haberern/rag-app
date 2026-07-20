@@ -1,28 +1,21 @@
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
 from datetime import datetime
-
-from sqlalchemy import DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from rag_app.db.base import Base
 
-if TYPE_CHECKING:
-    from rag_app.models.document import Document
+from uuid import UUID
+
+
+from sqlalchemy import func, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class User(Base):
     __tablename__ = "users"
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    # Server-side default so every row is stamped by the DB clock (uniform, tz-aware); the
-    # app never sends this value. created_at + TTL is the sweep's expiry test.
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("owners.id", ondelete="CASCADE"), primary_key=True
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        server_default=func.now(), nullable=False
     )
-
-    documents: Mapped[list["Document"]] = relationship(
-        back_populates="owner",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
+    password_hash: Mapped[str] = mapped_column(nullable=False)
+    username: Mapped[str] = mapped_column(unique=True, nullable=False)

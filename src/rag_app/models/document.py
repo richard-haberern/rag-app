@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy import ForeignKey, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,7 +10,7 @@ from rag_app.db.base import Base
 
 if TYPE_CHECKING:
     from rag_app.models.chunk import Chunk
-    from rag_app.models.user import User
+    from rag_app.models.owner import Owner
 
 
 class Document(Base):
@@ -21,7 +21,9 @@ class Document(Base):
         UniqueConstraint("owner_id", "content_hash", name="uq_document_owner_hash"),
     )
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=func.gen_random_uuid()
+    )
     filename: Mapped[str]
     # Original document text, stored verbatim. Also lives split across chunks; kept here so
     # full-content reads are exact (joining chunks would duplicate overlap / drop whitespace).
@@ -36,9 +38,9 @@ class Document(Base):
     # documents (and, in turn, their chunks/vectors); the cascade is an FK action, so it runs
     # even though RLS/FORCE is on. Indexed: the documents RLS policy and the cascade scan it.
     owner_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
+        ForeignKey("owners.id", ondelete="CASCADE"), index=True
     )
-    owner: Mapped["User"] = relationship(back_populates="documents")
+    owner: Mapped["Owner"] = relationship(back_populates="documents")
 
     chunks: Mapped[list["Chunk"]] = relationship(
         back_populates="original_document",
