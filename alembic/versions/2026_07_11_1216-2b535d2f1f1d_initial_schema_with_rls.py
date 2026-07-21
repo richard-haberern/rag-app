@@ -125,15 +125,11 @@ def upgrade() -> None:
         """
     )
 
-    # app_user is provisioned outside Alembic (init.sql / console). No sequence grants:
-    # UUID PKs are client-side (default=uuid4), so there are no sequences.
+    # app_user is provisioned outside Alembic (init.sql / console).
     op.execute("GRANT USAGE ON SCHEMA public TO app_user")
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON documents, chunks, vectors TO app_user"
     )
-    # users is not RLS-protected; app_user reads/creates/sweeps rows directly. No UPDATE:
-    # a user row is immutable (id + created_at) once minted.
-    op.execute("GRANT SELECT, INSERT, DELETE ON users TO app_user")
 
 
 def downgrade() -> None:
