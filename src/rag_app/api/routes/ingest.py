@@ -21,7 +21,7 @@ class DocumentRequest(BaseModel):
     metadata: dict = {}
 
 
-router = APIRouter(prefix="/ingest")
+router = APIRouter()
 
 
 @router.post("/store")
@@ -46,7 +46,7 @@ async def store_document(
     return doc_id
 
 
-@router.delete("/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/delete/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_document(
     doc_id: UUID,
     ingestor: Annotated[IngestionService, Depends(get_ingestor)],
