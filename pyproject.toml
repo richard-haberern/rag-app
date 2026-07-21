@@ -21,16 +21,6 @@ dependencies = [
     "argon2-cffi>=25.1.0",
 ]
 
-# Test-only deps. Already present in .venv but were undeclared; pin loosely so the suite is
-# reproducible. httpx is also pulled transitively, but the tests import it directly (MockTransport).
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.15.20",
-    "mypy>=2.1.0",
-]
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -128,6 +118,17 @@ name = "ruff"
 type = "module"
 module = "ruff"
 options = "check --fix REVISION_SCRIPT_FILENAME"
+
+# Dev tooling (PEP 735). uv installs this group by default on `uv sync` / `uv run`.
+# Single source of truth: httpx is pulled transitively but the tests import it
+# directly (MockTransport), so it stays a runtime dep above, not here.
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.20",
+    "mypy>=2.1.0",
+]
 #
 # [[tool.alembic.post_write_hooks]]
 # Alternatively, use the exec runner to execute a binary found on your PATH
