@@ -12,6 +12,7 @@ from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import DocumentExists, EmptyDocument
 
+from asyncio import to_thread
 
 class IngestionService:
     # all DI (dependency injection), just references to once created in API layer
@@ -43,9 +44,9 @@ class IngestionService:
             ChunkDTO(uuid4(), ch, document.id, position)
             for position, ch in enumerate(chunks)
         ]
-        # create vectors - here just list of str. Embedding is done outside the write
-        # transaction below - it's slow CPU work and shouldn't hold a transaction open.
-        vectors = self.embedder.embed_document(chunks)
+        # callable then arg - so it can run on a different event loop and 
+        # not block it
+        vectors = await to_thread(self.embedder.embed_document, chunks)
         # Single atomic transaction: document, chunks and vectors all live in Postgres,
         # so they commit or roll back together - no orphan-vector window. The exists()
         # pre-check above handles the common case; the IntegrityError guard covers the

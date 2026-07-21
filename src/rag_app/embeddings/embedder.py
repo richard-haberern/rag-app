@@ -2,6 +2,7 @@ from typing import Any
 
 from sentence_transformers import SentenceTransformer
 from numpy import ndarray
+from threading import Lock
 
 from rag_app.config import get_settings
 from rag_app.schemas import Embedding
@@ -14,7 +15,7 @@ class Embedder:
             settings.embed_model_name, device=settings.embed_device
         )
         self._batch_size = settings.embed_batch_size
-
+        self._lock = Lock()
         # Guard: the model's dimension must match the configured (and pgvector-baked) one.
         actual = self.model.get_embedding_dimension()
         if actual != settings.embed_dim:
@@ -46,21 +47,22 @@ class Embedder:
             )
         return max_seq - self.model.tokenizer.num_special_tokens_to_add()
 
-    # The embed_document / embed_query split and the encode_* calls are the human's
-    # core-logic decision (ingest/query symmetry). batch_size here is plumbing only and
-    # does not change which vectors come out.
-    #
+    # use the lock (both embed methods) so prevent that ST doesn't guarantee 
+    # that a single model is safe for concurrent calls - we run these from 
+    # a different thread so we don't block the event loop 
     def embed_document(self, texts: list[str]) -> list[Embedding]:
-        emb = self.model.encode_document(
-            texts, batch_size=self._batch_size, convert_to_numpy=True
-        )
+        with self._lock:
+            emb = self.model.encode_document(
+                texts, batch_size=self._batch_size, convert_to_numpy=True
+            )
         assert isinstance(emb, ndarray)
         return emb.tolist()
 
     def embed_query(self, query: str) -> list[Embedding]:
         # Single-element outer list, per the agreed return shape.
-        emb = self.model.encode_query(
-            [query], batch_size=self._batch_size, convert_to_numpy=True
-        )
+        with self._lock:
+            emb = self.model.encode_query(
+                [query], batch_size=self._batch_size, convert_to_numpy=True
+            )
         assert isinstance(emb, ndarray)
         return emb.tolist()
