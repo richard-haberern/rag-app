@@ -67,6 +67,7 @@ def upgrade() -> None:
         CREATE OR REPLACE FUNCTION public.registration(p_username text, p_password_hash text)
         RETURNS uuid
         LANGUAGE sql
+        VOLATILE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -123,6 +124,7 @@ def upgrade() -> None:
         CREATE OR REPLACE FUNCTION public.sweep_owners()
         RETURNS VOID
         LANGUAGE sql
+        VOLATILE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -138,6 +140,7 @@ def upgrade() -> None:
         """CREATE OR REPLACE FUNCTION public.sweep_sessions()
         RETURNS VOID
         LANGUAGE sql
+        VOLATILE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -152,6 +155,7 @@ def upgrade() -> None:
         """CREATE OR REPLACE FUNCTION public.validate_session(p_token_hash text)
         RETURNS uuid
         LANGUAGE sql
+        STABLE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -171,6 +175,7 @@ def upgrade() -> None:
         RETURNS void
         LANGUAGE sql
         SECURITY DEFINER
+        VOLATILE
         SET search_path = ''
         AS $$
             INSERT INTO public.sessions (token_hash, owner_id, expires_at)
@@ -189,6 +194,7 @@ def upgrade() -> None:
         """CREATE OR REPLACE FUNCTION public.login_check(p_username text)
         RETURNS TABLE (owner_id uuid, password_hash text)
         LANGUAGE sql
+        STABLE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -207,6 +213,7 @@ def upgrade() -> None:
         """CREATE OR REPLACE FUNCTION public.logout(p_token_hash text)
         RETURNS void
         LANGUAGE sql
+        VOLATILE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -223,6 +230,7 @@ def upgrade() -> None:
         """CREATE OR REPLACE FUNCTION public.logout_everywhere(p_owner_id uuid)
         RETURNS void
         LANGUAGE sql
+        VOLATILE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
@@ -241,6 +249,7 @@ def upgrade() -> None:
         """CREATE OR REPLACE FUNCTION public.delete_account(p_owner_id uuid)
         RETURNS void
         LANGUAGE sql
+        VOLATILE
         SECURITY DEFINER
         SET search_path = ''
         AS $$
