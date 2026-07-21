@@ -22,16 +22,18 @@ jobs:
       # Settings (config.py) reads the process environment; export .env.ci so every
       # later step (pytest) sees DB_*_TEST etc. File is clean KEY=VALUE lines.
       run: cat .env.ci >> "$GITHUB_ENV"
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v6
+    - name: Set up uv
+      # Installs uv and caches the uv download/wheel cache keyed on uv.lock.
+      uses: astral-sh/setup-uv@v5
       with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+        # Pin the interpreter uv provisions (requires-python only floors it at 3.12).
         python-version: "3.12"
-        cache: 'pip'
-        cache-dependency-path: pyproject.toml
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+      # --frozen: fail if uv.lock is out of date rather than silently re-resolving,
+      # so CI installs exactly the locked versions (dev group included by default).
+      run: uv sync --frozen
     - name: Start services
       # --wait blocks until pg is healthy. Must target pg explicitly: pg-init is also in
       # the test profile but is a one-shot job (restart: "no") that exits 0 on success --
@@ -45,16 +47,16 @@ jobs:
       # Same command the app itself runs before serving (see docker-compose.yaml's api
       # service / README) -- test schema (incl. RLS/policies/grants) now matches prod
       # exactly instead of a separate create_all path.
-      run: DATABASE_URL="postgresql+asyncpg://raguser:testpassword@$localhost:5432/rag_test" alembic upgrade head
+      run: DATABASE_URL="postgresql+asyncpg://raguser:testpassword@localhost:5432/rag_test" uv run alembic upgrade head
     - name: Lint with ruff
       run: |
-        ruff check ./src
+        uv run ruff check ./src
     - name: Type checks with mypy
       run: |
-        mypy ./src
+        uv run mypy ./src
     - name: Test with pytest
       run: |
-        pytest
+        uv run pytest
     - name: Service logs and cleanup
       if: always()
       run: |
