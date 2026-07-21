@@ -1,8 +1,8 @@
 # Architecture Decisions
 
 Living record of the architectural choices for this RAG app and *why* they were
-made. Scope is the **v1 MVP**: correct end-to-end, backend-first. Anything marked
-deferred is intentionally out of scope for v1 — see the final section.
+made. Scope is the **v2**: correct end-to-end, backend-first. Anything marked
+deferred is intentionally out of scope for v2 — see the final section.
 
 ---
 
@@ -31,7 +31,6 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **Local embeddings via sentence-transformers.**
 - The workload doesn't need heavy compute.
-- More is learned by running embeddings locally than by calling an API.
 
 **LLM via API for generation.**
 
@@ -63,13 +62,9 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **Separate `chunk_store`, `doc_store`, `vector_store`.**
 - Three thin, single-responsibility stores; all are stateless and take a caller-owned
-  `session` (the service layer owns the transaction — see below).
+  `session` (the app owns the transactions — see below).
 - Chunk mapping keeps a `position`, which improves LLM generation when the top-k
   chunks are retrieved.
-- `Chunk`: `position` (int) + `UniqueConstraint(document_id, position)`.
-
-**Vector model PK renamed `id` → `chunk_id`.**
-- Matches the `(chunk_id, vector)` shape; one vector per chunk.
 
 **`stored_vectors` keeps an FK → `stored_chunks(chunk_id)` `ON DELETE CASCADE`.**
 - Buys referential integrity + cascade deletes. This FK is the **mechanism** behind
@@ -96,23 +91,15 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Note: asyncpg wants `connect_args["ssl"]` (bool/SSLContext), **not** libpq's
   `sslmode` URL query param.
 
-**Services own the session makers and the transaction boundaries.**
-- Every store — including the vector store — is stateless and takes the session as an
-  argument. A service opens one transaction and passes that session to `doc_store`,
-  `chunk_store` and `vector_store` together, which is what makes a store or a delete
-  atomic.
-- Cost: a little overhead on reads and extra plumbing (services must begin/end
-  sessions).
+**The app owns the session makers and the transaction boundaries.**
+- Every store and service — is stateless and takes the session as an
+  argument. The app opens one transaction with the GUC set for correct authorization and passes that session to all of the *services* which then pass it to all of the *stores*, what makes all of the deletes and inserts **atomic**.
+- Cost: a little overhead on reads 
 
 **Document dedup by content hash.**
 - Two documents are duplicates if their content is identical; the hash is stored.
 - Non-character documents are rejected.
 
-**No self-heal needed — the atomic write removes the failure mode.**
-- The "document + chunks stored but vectors missing" state can no longer occur: all
-  three are written in one transaction, so a failure rolls the whole thing back and
-  the document simply isn't stored. Dedup by content hash then lets the client retry
-  cleanly.
 
 **Ingest takes content from the request body (path → content redesign).**
 - Documents are sent as `content` in the request body; the service no longer reads
@@ -127,7 +114,7 @@ deferred is intentionally out of scope for v1 — see the final section.
 ## Embedding
 
 **Model: `all-MiniLM-L6-v2` (dim 384).**
-- Best fit for the v1 MVP: local, easy, fast on CPU with no GPU.
+- Best fit for the v2: local, easy, fast on CPU with no GPU.
 - Relatively small and an industry standard; not the strongest embedder, but
   enough for the MVP and easy to swap later based on MTEB.
 
@@ -155,9 +142,7 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **Search takes a similarity threshold.**
 
-**Search is a deterministic exact (linear) scan.**
-- pgvector orders by cosine distance with `chunk_id` as a secondary key, so results
-  are stable and ties break deterministically. (No HNSW/IVFFlat index at MVP scale.)
+**Search uses HNSW ANN index.**
 
 ---
 
@@ -181,11 +166,11 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Deferred: cross-encoder re-ranking of the top-k.
 
 **Prompt builder.**
-- No citations in v1.
+- No citations in v2.
 
 **LLM client.**
-- v1 uses Gemini's free-tier Flash 2.5: fast answers, free for development. Note
-  the free tier trains on submitted queries — acceptable for v1.
+- v2 uses Gemini's free-tier Flash 2.5: fast answers, free for development. Note
+  the free tier trains on submitted queries — acceptable for v2.
 - The client is swappable.
 - Prompts go out over `httpx` directly — no extra dependency on an
   `anthropic` / `openai` / … SDK.
@@ -200,9 +185,22 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **FastAPI HTTP layer.**
 - Documents are accepted as `str` content inside JSON — no document parsing.
-- Uses routes for a clean architecture.
+- Uses routes for a clean architecture. Four routers are mounted (`api/main.py`):
+  `ingest` (`/ingest/*`), `query` (`/query/*`), `auth` (`/register`, `/login`,
+  `/anonymous_login`, `/logout`, `/logout_everywhere`, `/delete_account` — see
+  *Authentication & Sessions*), and `dev` (`/health`, `/admin/cleanup`).
 - Deferred: document upload.
-- API runs on port **8080**.
+- The app listens on port **8000** inside the container; Compose publishes it on host
+  **8080** (`8080:8000`).
+
+**`dev` router: health + out-of-band sweep.**
+- `GET /health` is a plain liveness string.
+- `POST /admin/cleanup` runs the retention sweep (`sweep_owners` + `sweep_sessions`). It is
+  gated by a `sweep-token` header compared with `secrets.compare_digest` against the
+  `SWEEP_TOKEN` setting; **any** failure (missing/misconfigured token or mismatch) returns a
+  bare **404**, so the endpoint is indistinguishable from a non-route to an unauthenticated
+  probe. Triggered monthly by a GitHub Action (`.github/workflows/sweep.yaml`, cron `0 3 1 * *`)
+  against the deployed instance; `workflow_dispatch` allows a manual run.
 
 **Exception architecture.**
 - One root, `AppError` (`rag_app/exceptions`), for every error the app raises on purpose.
@@ -211,11 +209,12 @@ deferred is intentionally out of scope for v1 — see the final section.
   class by MRO). Per-type handlers are therefore unnecessary and were removed.
 - The tree splits by responsibility, not just by name:
   - `RagError` (4xx, client): `DocumentNotFound` (404), `EmptyDocument` (422),
-    `QueryError` (413).
-  - `InternalError` (5xx, invariant violations): `ChunkNotFound`, `VectorNotFound` — these
-    mean the data is inconsistent (a chunk with no vector, a document with no chunks), not
-    that the client asked for something missing, so they are **not** 404s. Both are
-    internal-only today (no routed caller); kept for defense-in-depth.
+    `DocumentExists` (409), `QueryTooLong` (413), and the auth errors
+    `UsernameAlreadyExists` (409), `LoginUnsuccessful` (401), `InvalidSession` (401).
+  - `InternalError` (5xx, invariant violations): `ChunkNotFound`, `VectorNotFound`,
+    `OwnerNotFound` — these mean the data is inconsistent (a chunk with no vector, a document
+    with no chunks), not that the client asked for something missing, so they are **not**
+    404s. Internal-only today (no routed caller); kept for defense-in-depth.
   - `LLMError` (502, upstream): wraps **all** httpx failures (status, timeout, connection)
     raised in `LLMClient.generate`, plus `LLMBadAnswer` for a malformed 200 body. Reports
     the upstream status code only — `str(exc)` would leak the Gemini URL.
@@ -270,7 +269,9 @@ deferred is intentionally out of scope for v1 — see the final section.
 
 **Docker / distribution.**
 - Set the `LLM_API_KEY` env var to enable generation.
-- Distribution model is "clone + build".
+- **Deployed** to Hugging Face Spaces (`https://haberric-rag-app-v1.hf.space`) against a
+  managed Postgres. Deployment-specific choices (SameSite/CSRF posture on the PSL, the
+  iframe-embed hole) are recorded under *Authentication & Sessions*.
 - DB schema is applied out-of-band via Alembic (as owner) before boot — it is **not** created
   in the API lifespan anymore. In compose, run e.g. `docker compose run --rm api alembic
   upgrade head` (the `api` service carries the owner `DATABASE_URL` for exactly this) before the
@@ -291,14 +292,12 @@ deferred is intentionally out of scope for v1 — see the final section.
   (`pyproject.toml`); `alembic.ini` holds only logging. `env.py` is the async template,
   injecting `sqlalchemy.url` from Settings with `Base.metadata` as target.
 - Migrations/admin connect as the owner `raguser` (`DATABASE_URL`); the runtime app connects
-  as `app_user` (`APP_DATABASE_URL`) — **now wired** (see *Anonymous cookie tenancy* below).
+  as `app_user` (`APP_DATABASE_URL`) — **now wired** (see *Authentication & Sessions* below).
 
 **One clean initial migration; DB reset from scratch — no destructive op in a migration.**
 - The whole schema (documents/chunks/vectors + constraints, indexes, RLS, policies, grants)
   is a single initial migration — no rename/backfill/truncate churn.
-- Prod holds no real data, so the transition is a **from-scratch reset** (drop tables +
-  `alembic_version`, or the whole DB, then `alembic upgrade head`) done **out-of-band**,
-  never as a statement inside a migration. Rationale: a `TRUNCATE` is irreversible, and
+- Rationale: a `TRUNCATE` is irreversible, and
   irreversible destructive operations must not live in a migration (migrations must be
   reversible). If the DB ever holds real data before a schema change, the pattern flips to
   add-nullable → backfill → `SET NOT NULL`.
@@ -307,17 +306,20 @@ deferred is intentionally out of scope for v1 — see the final section.
 - Shared tables with an `owner_id` discriminator on `documents` only. `chunks`/`vectors`
   isolate by **composing** through the parent's policy: their `USING`/`WITH CHECK` is a
   subselect (`document_id IN (SELECT id FROM documents)`, `chunk_id IN (SELECT id FROM
-  chunks)`); the subselect is itself RLS-filtered, so a child row is visible iff its
+  chunks)`); the subselect is itself RLS-filtered, so a child row is visible if its
   document is. One source of truth (a single `owner_id`), no denormalized copies to keep in
   sync. Requires an index on `chunks.document_id` (added; the FK had none).
-- Policies key off `current_setting('app.owner_id', true)::uuid`. Unset → NULL →
-  **fail-closed** (rows hidden, writes rejected by `WITH CHECK`). The app sets this GUC
-  **transaction-locally** per request via a `set_config(..., true)` in the `set_guc_rw`/
-  `set_guc_ro` dependency, which holds one `AsyncSession` (one connection, one transaction)
-  open across the request — a non-local `SET` would leak tenants across pooled connections.
-- **`owner_id`'s source is now the `users` registry** (resolved — see *Anonymous cookie
-  tenancy*). The value is not client-supplied-and-trusted: it comes from a server-signed cookie
-  (itsdangerous) validated against `users`, so a client cannot assert an arbitrary owner.
+- Policies key off `current_setting('app.owner_id', true)::uuid` (`NULLIF(..., '')` folds both
+  the unset-NULL and the reset-empty-string cases to NULL). Unset → **fail-closed** (rows
+  hidden, writes rejected by `WITH CHECK`). The app sets this GUC **transaction-locally** per
+  request via a `set_config(..., true)` in the single `set_guc` dependency (`api/deps.py`),
+  which holds one `AsyncSession` (one connection, one transaction) open across the request — a
+  non-local `SET` would leak tenants across pooled connections. `set_guc` **raises
+  `InvalidSession` (401) when there is no owner**, so every routed request now needs a valid session (anonymous or logged in); reads no longer fall through to an empty result, they are rejected.
+- **`owner_id`'s source is the `sessions` table** (see *Authentication & Sessions*). It is not
+  client-supplied-and-trusted: the client sends an opaque `session_token` cookie whose SHA-256
+  hash is looked up in `sessions` (`validate_session`) to resolve the owner, so a client cannot
+  assert an arbitrary owner.
 
 **ENABLE + FORCE — but the effective boundary is a non-owner role.**
 - All three tables `ENABLE` RLS (subjects non-owner roles) and `FORCE` RLS. Caveat learned
@@ -336,34 +338,98 @@ deferred is intentionally out of scope for v1 — see the final section.
   `pg_roles`/`pg_database` before creating), unlike the `docker-entrypoint-initdb.d` scripts it
   replaced, which only ever ran once, on a brand-new volume. The migration only `GRANT`s it
   `SELECT/INSERT/UPDATE/DELETE` on the three tables (+ `USAGE` on schema). No sequence grants —
-  UUID PKs are client-side.
+  UUID PKs are server-side.
 - Boundary rule: **Alembic owns intra-database schema; bootstrap-pg.sh/infra owns databases
   and roles.** Alembic can't `CREATE DATABASE` the DB it connects to, and the role must
   pre-exist the GRANT (or the migration fails fast). Never duplicate table DDL across both.
-- The migration also `GRANT`s `app_user` `SELECT/INSERT/DELETE` on `users` (no `UPDATE`: a user
-  row is immutable once minted). `users` is deliberately **not** under RLS — see below.
+- The credential (`users`), session (`sessions`) and owners (`owners`) tables added by the auth migration get **no
+  table DML grant** at all: `app_user` reaches them only through `EXECUTE` on the
+  `SECURITY DEFINER` functions (see below), never directly.
 
-**Anonymous cookie tenancy (implemented).**
-- Identity is an anonymous per-visitor `owner_id` (UUIDv4) stored in a new `users(id,
-  created_at)` table — the registry the RLS `owner_id` keys off. Carried in a server-signed
-  cookie (`itsdangerous.Signer`; JWT is overkill for one unguessable UUID — the signature only
-  stops a client asserting a *known* other tenant's id, and retention is enforced server-side).
-- **`users` has no RLS.** The cookie dependency reads it *before* `app.owner_id` is set, so an
-  owner-keyed policy there would fail closed and force an infinite re-mint. It's the tenant
-  registry, managed by the app, not tenant-scoped data.
-- **Ownership FK drives the purge.** `documents.owner_id → users.id ON DELETE CASCADE`. Deleting
-  a user cascades to its documents → chunks → vectors. The cascade is an FK action, so it bypasses
-  RLS/`FORCE` even though the sweeping session has no `app.owner_id` set — but *only* as an FK
-  cascade; an app-issued `DELETE FROM documents` would be ordinary RLS-filtered DML and must never
-  replace it.
-- **Dependency split.** `resolve_owner` validates the cookie (no mint); `require_owner` mints on
-  miss (write paths only); `set_guc_rw` (writes) always sets the GUC, `set_guc_ro` (reads) sets it
-  only if a valid owner exists, else leaves it unset → reads fail closed to empty. Minting is
-  **write-only**: cookieless reads never create a `users` row (a crawler can't inflate the table).
-- **Retention.** `TTL` (config, a `timedelta`, default 30d) is the server-side retention window;
-  `cookie_expire` is the browser cookie max_age, kept aligned to TTL. Expired users are removed by
-  a **probabilistic inline sweep** (~10% per mint) — accepted MVP debt (only fires with new-cookie
-  traffic; the unlucky request pays the cascade delete). A background/`pg_cron` job is the later fix.
+---
+
+## Authentication & Sessions
+
+Supersedes the earlier itsdangerous "anonymous cookie tenancy" design (dropped, along with
+the `itsdangerous` dependency). Two concerns are kept separate on purpose:
+**authorization** — *what content a caller may touch* — is RLS + the transaction-local
+`app.owner_id` GUC + the `owners` table (above). **Authentication** — *how we verify a caller
+is who they claim* — is the credential/session machinery here.
+
+**Three-table identity model (`owners` / `users` / `sessions`).**
+- `owners(id, created_at, expires_at)` is the tenancy discriminator the RLS `owner_id` keys
+  off. `expires_at IS NULL` = a **registered** account (never expires); a set `expires_at` =
+  an **anonymous** owner (minted with `now() + 30 days`). One `owner` per tenant.
+- `users(owner_id PK → owners.id, username UNIQUE, password_hash, created_at)` holds
+  **credentials** for registered accounts only. Splitting credentials off `owners` keeps the
+  tenancy key free of login data and lets an anonymous owner exist with no `users` row.
+- `sessions(id, token_hash UNIQUE, owner_id → owners.id, created_at, expires_at)` holds live
+  sessions. All three child tables FK to `owners(id) ON DELETE CASCADE`.
+
+**Sessions are opaque bearer tokens, verified by DB lookup — not signed.**
+- A token is `secrets.token_urlsafe()`; only its **SHA-256 hash** is stored (`sessions.token_hash`),
+  so a DB read can't replay a session. The raw token rides a `session_token` cookie
+  (`httponly`, `samesite=lax`, `secure` per the `SECURE` setting, `max_age=cookie_expire`).
+- This replaces the itsdangerous *signed* cookie: a DB-backed opaque token needs no signature
+  (validity is "does this hash exist and is it unexpired", via `validate_session`), and it is
+  server-side revocable (logout deletes the row) — which a stateless signed cookie is not.
+- Login sessions expire after **1 day** (`create_session_login`); anonymous owner+session are
+  minted together with the **30-day** window (`anonymous_mint`), so a session and its anonymous
+  owner expire together.
+
+**All auth mutations go through `SECURITY DEFINER` SQL functions (`functions.sql`, installed by
+the auth migration).**
+- `registration`, `login_check`, `anonymous_mint`, `create_session_login`, `validate_session`,
+  `logout`, `logout_everywhere`, `delete_account`, `sweep_owners`, `sweep_sessions`. Each is
+  `SECURITY DEFINER SET search_path = ''`, `REVOKE`d from `PUBLIC` and `GRANT EXECUTE`d only to
+  `app_user`.
+- Rationale: `app_user` has **no direct DML** on `users`/`sessions`. Forcing every touch through
+  a fixed, owner-defined function surface is a "keyhole": under SQL injection it stops credential
+  **exfiltration** (there is no `SELECT * FROM users` grant to abuse). Honest limit recorded in
+  the DEVLOG: it does **not** stop **impersonation** — argon2 verification happens in the app, so
+  the DB cannot know a password was actually checked before `create_session_login` runs; a caller
+  who can already run arbitrary app SQL could mint a session without a password. Accepted for v2.
+- `SET search_path = ''` forces every reference inside the function to be schema-qualified
+  (`public.owners`, `pg_catalog.now()`), closing the search-path hijack that `SECURITY DEFINER`
+  otherwise invites.
+
+**Password hashing: argon2 (`argon2-cffi`), off the event loop.**
+- `PasswordHasher` from argon2; hashing/verification run via `run_in_threadpool` because argon2
+  is deliberately CPU-heavy and would otherwise stall the event loop. `Credentials` caps
+  username ≤ 64 and password ≤ 128 chars to bound per-request argon2 work (a DoS guard, not a
+  strength policy).
+- **Constant-time login.** A missing username still verifies the supplied password against a
+  precomputed `_DUMMY_HASH`, and every failure returns the same `LoginUnsuccessful` — no timing
+  or message oracle for username enumeration.
+
+**Endpoints.** `register` (mints owner + credentials, **no** session — must then log in),
+`login` (verify argon2 → `create_session_login` → set cookie), `anonymous_login` (mint owner +
+session in one call), `logout` (delete this session), `logout_everywhere` (delete all sessions
+for the owner), `delete_account` (delete the owner; FK cascade removes its users/sessions and
+documents→chunks→vectors). Registration and login-username races collapse to the same
+`UsernameAlreadyExists` (409), guarded by the `UNIQUE(username)` constraint + `IntegrityError`.
+
+**Retention & the FK-cascade purge.**
+- `TTL` (config `timedelta`, default 30d) is the server-side retention window for anonymous
+  owners; `cookie_expire` (seconds) is the browser cookie `max_age`, kept aligned to it.
+- Expiry is swept **out-of-band**, not inline: `sweep_owners` deletes anonymous owners past
+  `expires_at` and `sweep_sessions` deletes expired sessions. `documents.owner_id → owners.id
+  ON DELETE CASCADE` means deleting an owner cascades to its documents → chunks → vectors. The
+  cascade is an FK action, so it runs even though the sweeping session sets no `app.owner_id`
+  (RLS/`FORCE` don't apply to FK cascades) — but *only* as an FK cascade; an app-issued
+  `DELETE FROM documents` would be ordinary RLS-filtered DML and must never replace it.
+- The sweep is driven by `POST /admin/cleanup` (see *dev router*), invoked monthly by a GitHub
+  Action — replacing the earlier probabilistic ~10%-per-mint inline sweep.
+
+**Deployment posture (Hugging Face Spaces / CSRF).** Recorded in the DEVLOG and load-bearing:
+- All state-changing routes are **POST**; no GET ever mutates. Combined with `samesite=lax`,
+  that is the CSRF defense — cheaper than a CSRF token on every request body.
+- On the **direct** Space URL (`*.hf.space`), the PSL keeps other Spaces from being same-site
+  siblings, so `samesite=lax` cookies work normally. The **iframe embed** is cross-site and
+  would need `samesite=none` (naked to CSRF) *and* is a user/session-minting hole, so the embed
+  is intentionally unsupported — the plan is a redirect/pop-out to the direct URL.
+- Deferred to v3: an explicit `Origin` check as a second CSRF factor, and rate-limiting for
+  `curl`/non-browser callers.
 
 ---
 
@@ -382,41 +448,43 @@ deferred is intentionally out of scope for v1 — see the final section.
   any volume, fresh or existing, replacing the old fresh-volume-only `initdb.d` scripts.
 - Schema is applied with `alembic upgrade head` against `rag_test` (`DATABASE_URL`
   pointed at it, owner creds) before the suite runs — the **same migration** as prod, so
-  RLS/policies/grants are identical; `conftest.py` no longer bootstraps schema itself
-  (the `setup_schema`/`create_all` fixture is gone).
+  RLS/policies/grants are identical.
 - Two connections are available to tests: the plain `session` fixture (`raguser` — a
   superuser, bypasses RLS; used for everything not specifically testing isolation) and
   `app_session`/`tenant` (`app_user`, `app.owner_id` set for a fresh tenant — actually
-  RLS-enforced, mirroring `api/deps.py`'s `set_guc_rw`). `APP_DATABASE_URL_TEST` (new
-  `Settings` field) supplies the `app_user`→`rag_test` URL. RLS isolation is now
-  testable; writing the isolation-behavior tests themselves is still open.
-- Test-DB creds couple `DB_PASSWORD_TEST`/`APP_DATABASE_URL_TEST`'s password to
-  `POSTGRES_PASSWORD`/`APP_USER_PASSWORD` (same roles).
+  RLS-enforced, mirroring `api/deps.py`'s `set_guc`). The `Settings` fields `TEST_DATABASE_URL`
+  (owner → `rag_test`) and `TEST_APP_DATABASE_URL` (`app_user` → `rag_test`) supply the two test
+  URLs. RLS isolation is now testable, and `tests/test_multi_tenancy.py` exercises cross-tenant
+  read/write isolation directly.
+- The two test URLs reuse the same `raguser`/`app_user` passwords as the app roles (same roles,
+  pointed at `rag_test`).
 
 **CI.**
 - Uses a single `compose up` (`test` profile) to stand up Postgres, then `docker compose
   run --rm pg-init` + `alembic upgrade head` (against `rag_test`) to provision and
   schema-load it, then runs host-side pytest against it — the same sequence documented
-  for local runs (README *Testing*), so CI and local no longer diverge in how the test DB
-  gets ready.
+  for local runs (README *Testing*).
 - Uses a committed `.env.ci` file with test credentials against a test DB.
+
+**Dependency management: uv.**
+- `uv` is the package/venv manager; `uv.lock` is committed and is the source of truth for
+  exact versions. `uv sync --frozen` in CI installs from the lock (fails rather than
+  re-resolving if the lock is stale).
+- Dev tooling (pytest, pytest-asyncio, ruff, mypy) lives in **one** place: the PEP 735
+  `[dependency-groups].dev` table, which `uv sync`/`uv run` install by default. We do *not*
+  use `[project.optional-dependencies]` — having both let the two lists drift (uv reads only
+  the group; the old `pip install .[dev]` read only the extra), which is what broke local
+  test/lint runs. Runtime deps stay in `[project.dependencies]`.
+- CI installs via `uv sync --frozen` and invokes every tool through `uv run`
+  (`uv run ruff/mypy/pytest/alembic`), so CI and local use the identical resolved env.
 
 ---
 
 ## Deferred / Out of Scope (v1)
 
-1. ~~**`create_all` → Alembic.**~~ Resolved: the schema (prod and test) is defined solely
-   by the Alembic migration (see *Migrations & Multi-tenancy*, *Testing & CI*).
-   `rag_test` is schema-loaded with `alembic upgrade head`, same as prod, and
-   `app_session`/`tenant` fixtures make RLS isolation testable — the remaining gap is
-   writing the isolation-behavior tests themselves, not the infra to support them.
-2. **Cross-encoder reranking of top-k.** v1 is bi-encoder retrieval only.
-3. ~~**Orphan chunks — accepted.**~~ Resolved: store and delete are now single atomic
-   transactions in one Postgres DB, so neither orphan chunks nor orphan vectors occur
-   (see "Atomic writes & deletes"). No reconciler needed.
-4. **Move embedding off the event loop** (`asyncio.to_thread`).
-5. **Dependency pinning.** `pyproject.toml` currently uses lower-bound `>=`
-   constraints, so a future package change could break us. Pin with a lockfile later.
-6. **`created_at` / audit columns.**
-7. **Broader out-of-scope set for v1:** auth, streaming, multiple collections, and
-    document upload.
+1. **Cross-encoder reranking of top-k.** v2 is bi-encoder retrieval only.
+2. **Second CSRF factor + rate-limiting.** An explicit `Origin` check and rate-limiting for
+   non-browser callers, plus a supported iframe-embed path, are deferred to v3 (see
+   *Authentication & Sessions → Deployment posture*).
+
+3. **Broader out-of-scope set for v2**: document upload.

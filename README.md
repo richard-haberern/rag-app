@@ -5,12 +5,14 @@ document, splits it into chunks, embeds them locally, and stores the vectors. At
 query time it retrieves the most relevant chunks and grounds an LLM's answer in
 them — so answers are tied to your source material, not the model's training data.
  
-Built backend-first as a learning vehicle: the goal was *correct end-to-end with
-every line understood*, not a production deployment. Auth, observability, and rate
-limiting are explicitly out of scope for this version.
+Built backend-first, it's deployed on [Hugging Face Spaces](https://haberric-rag-app-v1.hf.space).
  
 ## Highlights
  
+- **Multi-tenant with real auth** — username/password (argon2) plus one-click anonymous
+  sessions, opaque DB-backed session tokens, and Postgres row-level security so every tenant
+  sees only its own documents. All credential/session writes go through `SECURITY DEFINER`
+  SQL functions, so the least-privilege app role never touches the auth tables directly.
 - **Atomic ingest & delete** — documents, chunks and vectors live in one Postgres DB,
   so a store or a delete is a single transaction: it fully happens or fully rolls back,
   with no orphaned chunks or vectors.
@@ -18,8 +20,8 @@ limiting are explicitly out of scope for this version.
   separated, and ORM objects never escape the store layer (converted to DTOs at the
   boundary), so the app depends on plain data, not live session state.
 - **Deliberate test strategy** — three-tier embedder (dummy / known / real vectors),
-  per-test DB isolation, and a faked LLM transport, so the suite is fast and runs with
-  zero network calls.
+  per-test DB isolation (including RLS-enforced tenant fixtures), and a faked LLM transport,
+  so the suite is fast and runs with zero network calls.
 ---
 
 ## Architecture
@@ -35,7 +37,7 @@ The codebase is split into two layers:
 - **Stores** (`DocStore`, `ChunkStore`, `PgVectorStore`) — own persistence only. Each
   is stateless and receives a session as an argument; it does not own or open it.
 - **Services** (`IngestionService`, `RetrievalService`, `QueryService`) — own the
-  business logic and orchestrate stores within a transaction.
+  business logic and orchestrate stores.
 
 ORM objects never escape the store layer; they're converted to DTOs at the boundary
 so the rest of the app depends on plain data, not on live SQLAlchemy session state.
@@ -58,9 +60,8 @@ flowchart LR
     D -. Store orchestration .-> S
     E -. vector search .-> S
 ```
-<!-- FLAG: this diagram is my reconstruction of your flow from our past work.
-     Check the ingest write order (docs + chunks + vectors now commit in one
-     transaction) and that retrieval reads through PgVectorStore.search. -->
+> The diagram is the data flow only; auth/tenancy (every request resolves an owner, then RLS
+> scopes the reads and writes) wraps both paths and is described below.
 
 **Notable decisions** (full rationale in [`DECISIONS.md`](./DECISIONS.md)):
 
@@ -69,19 +70,22 @@ flowchart LR
   seam clean (pgvector can't embed anyway) and guarantees the *same* embedder is used
   for both ingest and query, so both live in one vector space.
 - **The embedding model fixes the vector dimension** (384, baked into the pgvector
-  column). One model is chosen and kept for the whole MVP.
-- **Exact brute-force cosine search** (`<=>`), no HNSW/IVFFlat index. At MVP scale an
-  approximate index buys nothing; revisit at tens of thousands of vectors.
+  column). One model is chosen and used for the whole app.
 - **Retrieval uses a distance threshold *and* top-k** — the threshold is a quality
   gate, top-k is a ceiling.
 - **Session-per-method**: stores take a session as an argument rather than owning one,
-  keeping transaction boundaries in the service layer.
+  keeping transaction boundaries in the app layer for the authorization.
 - **Alembic-managed schema** — the schema (with row-level-security multi-tenancy) lives
-  in a single initial migration; because there's no real data yet, the DB is **reset from
-  scratch** rather than mutated, and no destructive op ever lives inside a migration.
-  The running app connects as the least-privilege `app_user` (so RLS is enforced) and no
+  in Alembic migrations. The running app connects as the least-privilege `app_user` (so RLS is enforced) and no
   longer creates schema on boot; `alembic upgrade head` (run as the owner) applies it (see
   DECISIONS.md → *Migrations & Multi-tenancy*).
+- **Auth is authorization + authentication, kept separate.** *Authorization* (what a tenant
+  may see) is Postgres RLS keyed off a transaction-local `app.owner_id` GUC and an `owners`
+  table. *Authentication* (verifying a caller) is a `session_token` cookie carrying an opaque
+  bearer token — only its SHA-256 hash is stored — resolved to an owner by a DB lookup. Every
+  request needs a valid session (anonymous or logged in), or it's rejected `401`. All auth
+  mutations run through `SECURITY DEFINER` SQL functions the app role may only `EXECUTE`, never
+  read (see DECISIONS.md → *Authentication & Sessions*).
 
 ---
 
@@ -90,10 +94,11 @@ flowchart LR
 | Layer | Choice | Why |
 |---|---|---|
 | API | FastAPI (async) | RAG is I/O-bound JSON endpoints, not server-rendered pages |
-| DB | PostgreSQL + pgvector | text and vectors stay consistent in one datastore at MVP scale |
+| DB | PostgreSQL + pgvector | text and vectors stay consistent in one datastore |
 | ORM | SQLAlchemy async + asyncpg | models the document↔chunk relation cleanly |
 | Embeddings | sentence-transformers (`all-MiniLM-L6-v2`, 384-dim) | small, free, runs locally — unlimited dev loop |
-| Generation | <!-- FLAG: confirm --> Gemini Flash via `httpx` | generation models are too large to host; API call instead |
+| Generation | Gemini 2.5 Flash via `httpx` | generation models are too large to host; API call instead, no vendor SDK |
+| Auth | argon2 (`argon2-cffi`) + opaque session tokens + Postgres RLS | password hashing off the event loop; RLS enforces tenant isolation in the DB |
 | Tests | pytest + pytest-asyncio | — |
 
 ---
@@ -106,8 +111,10 @@ flowchart LR
 # 1. Create a .env (compose auto-loads it)
 cat > .env <<'EOF'
 POSTGRES_PASSWORD=change-me
-APP_USER_PASSWORD=change-me-too   # least-privilege RLS role, created on a fresh volume
+APP_USER_PASSWORD=change-me-too   # least-privilege RLS role, provisioned by pg-init
 LLM_API_KEY=your-gemini-api-key   # required — generation calls Gemini
+SWEEP_TOKEN=some-long-secret      # optional — gates POST /admin/cleanup (retention sweep)
+# SECURE=true                     # set when serving over HTTPS, so the session cookie is Secure
 EOF
 
 # 2. Build images, start Postgres, provision it (rag_test db + app_user role), and
@@ -126,15 +133,16 @@ docker compose up api
 > on first startup the embedding model is downloaded. Expect several minutes the first
 > time — later runs are fast.
 
-Once it's up:
+Once it's up (Compose publishes the app on host port **8080** → `8080:8000`):
 
-- 🏠 Homepage (portfolio + contact) → <http://localhost:8000/>
-- 🧪 Live demo (ingest → retrieve → answer) → <http://localhost:8000/demo.html>
-- 📖 Interactive docs (Swagger) → <http://localhost:8000/docs>
+- 🏠 Homepage (portfolio + contact) → <http://localhost:8080/>
+- 🧪 Live demo (ingest → retrieve → answer) → <http://localhost:8080/demo.html>
+- 📖 Interactive docs (Swagger) → <http://localhost:8080/docs>
 
-The database schema is applied by the Alembic migration in step 2 (the pgvector extension
-and the users, documents, chunks and vectors tables, with RLS). The app itself connects as
-`app_user` and does not create schema.
+The database schema is applied by the Alembic migrations in step 2 (the pgvector extension;
+the `owners`, `users`, `sessions`, `documents`, `chunks` and `vectors` tables, with RLS; and
+the `SECURITY DEFINER` auth functions). The app itself connects as `app_user` and does not
+create schema.
 
 > **Migrations & multi-tenancy.** The RLS-enabled schema is defined by an Alembic
 > migration (`alembic upgrade head`); `docker compose run --rm pg-init` provisions the
@@ -147,25 +155,30 @@ and the users, documents, chunks and vectors tables, with RLS). The app itself c
 ### Run locally (without Docker)
 
 ```bash
-pip install -e .                       # needs Python 3.12
+uv sync                                   # creates .venv from uv.lock; needs Python 3.12
 # Postgres with pgvector running. In .env set:
 #   DATABASE_URL      -> owner (raguser) connection, used by Alembic
 #   APP_DATABASE_URL  -> app_user connection, used by the running app (RLS applies)
-#   SECRET_KEY        -> signs the anonymous owner cookie
 #   LLM_API_KEY       -> generation
-alembic upgrade head                   # apply schema as the owner (DATABASE_URL), once
-uvicorn rag_app.api.main:app --reload
+#   SWEEP_TOKEN       -> optional, gates POST /admin/cleanup
+uv run alembic upgrade head               # apply schema as the owner (DATABASE_URL), once
+uv run uvicorn rag_app.api.main:app --reload  # serves on http://localhost:8000
 ```
 
 ### Example
 
-A full ingest → ask → fetch round-trip. Each visitor is an anonymous tenant identified by a
-signed `owner` cookie; ingest mints it, and the reads only see your own documents, so carry
-the cookie across calls (`-c`/`-b` a cookie jar):
+A full auth → ingest → ask → fetch round-trip. Every request needs a valid session, so start
+by minting one — the simplest is a one-click anonymous session (or `POST /register` then
+`POST /login` for a username/password account). The session rides a `session_token` cookie, and
+you only ever see your own documents, so carry the cookie across every call (`-c`/`-b` a jar):
 
 ```bash
-# 1. Ingest a document — mints the owner cookie (saved to cookies.txt), returns the doc id
-curl -c cookies.txt -X POST http://localhost:8000/ingest/store \
+# 0. Mint an anonymous session — sets the session_token cookie (saved to cookies.txt)
+curl -c cookies.txt -X POST http://localhost:8080/anonymous_login
+# → "Anonymous login successful. Welcome!"
+
+# 1. Ingest a document — returns the doc id
+curl -b cookies.txt -c cookies.txt -X POST http://localhost:8080/ingest/store \
   -H "Content-Type: application/json" \
   -d '{
         "filename": "pangram.txt",
@@ -175,19 +188,19 @@ curl -c cookies.txt -X POST http://localhost:8000/ingest/store \
 # → "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
 # 2. See what retrieval finds — the top-k chunks for a query, in similarity order
-curl -b cookies.txt -X POST http://localhost:8000/query/retrieve \
+curl -b cookies.txt -X POST http://localhost:8080/query/retrieve \
   -H "Content-Type: application/json" \
   -d '{"query": "What does the fox jump over?"}'
 # → ["The quick brown fox jumps over the lazy dog."]
 
 # 3. Ask a question — the answer is grounded in your ingested documents
-curl -b cookies.txt -X POST http://localhost:8000/query/generate \
+curl -b cookies.txt -X POST http://localhost:8080/query/generate \
   -H "Content-Type: application/json" \
   -d '{"query": "What does the fox jump over?"}'
 # → "The fox jumps over the lazy dog."
 
 # 4. (optional) Fetch a stored document by id
-curl -b cookies.txt http://localhost:8000/query/documents/3fa85f64-5717-4562-b3fc-2c963f66afa6
+curl -b cookies.txt http://localhost:8080/query/documents/3fa85f64-5717-4562-b3fc-2c963f66afa6
 ```
 
 ---
@@ -196,15 +209,18 @@ curl -b cookies.txt http://localhost:8000/query/documents/3fa85f64-5717-4562-b3f
 
 ```
 src/rag_app/
-  api/          # FastAPI app, routes, dependencies
+  api/          # FastAPI app, routes (ingest, query, auth, dev), deps, cookie/session helpers
   services/     # IngestionService, RetrievalService, AnswerService
-  stores/       # DocStore, ChunkStore, VectorStore (persistence only)
-  models/       # SQLAlchemy ORM models
+  stores/       # DocStore, ChunkStore, PgVectorStore (persistence only)
+  models/       # SQLAlchemy ORM models (owner, user, session, document, chunk, vector)
+  exceptions/   # AppError hierarchy (each carries its own HTTP status)
   chunkings/    # chunker + factory
   embeddings/   # sentence-transformers wrapper
   llm/          # LLM client + factory + prompter
-  db/           # engine, base, startup bootstrap
+  db/           # engine, base
   static/       # homepage + demo frontend (plain HTML/CSS/JS, no build step)
+alembic/        # migrations: initial RLS schema, HNSW index, auth schema + SQL functions
+functions.sql   # reference copy of the SECURITY DEFINER auth functions (installed by the migration)
 tests/
 ```
 
@@ -220,8 +236,8 @@ steps are idempotent — safe to re-run):
 docker compose --profile test up -d --wait pg
 docker compose run --rm pg-init                                        # rag_test db + app_user role
 DATABASE_URL=postgresql+asyncpg://raguser:$POSTGRES_PASSWORD@localhost:5432/rag_test \
-  alembic upgrade head                                                 # schema, incl. RLS/policies/grants
-python -m pytest
+  uv run alembic upgrade head                                          # schema, incl. RLS/policies/grants
+uv run pytest
 ```
 
 The test design is deliberate:
@@ -244,16 +260,18 @@ CI (`.github/workflows/ci.yaml`) runs the same sequence against a committed `.en
 
 ## Status & roadmap
 
-- **v1 MVP — complete.** Ingest → chunk → embed → store → retrieve → prompt → answer,
+- **v2 — complete.** Ingest → chunk → embed → store → retrieve → prompt → answer,
   end-to-end, with atomic store/delete and a passing test suite.
-- **Next:** deployment (single service against a managed Postgres with pgvector).
-- **In progress:** row-level multi-tenancy (Postgres RLS + `app_user`) and wiring the app
-  onto Alembic migrations. Real tenant isolation is blocked on **auth** (see below).
-- **Deferred by design:** auth, reranking, streaming, multiple collections, observability,
-  rate limiting.
+- **Multi-tenancy + auth — done.** Postgres RLS + least-privilege `app_user`, Alembic-managed
+  schema, and a username/password + anonymous-session auth layer (argon2, DB-backed session
+  tokens, `SECURITY DEFINER` SQL functions). Tenant isolation is enforced and tested.
+- **Deployed** on Hugging Face Spaces against a managed Postgres with pgvector.
+- **Next (v3):** a second CSRF factor (explicit `Origin` check) + rate-limiting for non-browser
+  callers, a supported iframe-embed path.
+- **Deferred by design:** cross-encoder reranking, document upload
 
 ---
 
 ## License
 
-<!-- FLAG: pick one (MIT is the conventional default for a portfolio project) -->
+MIT
