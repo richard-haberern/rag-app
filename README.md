@@ -1,4 +1,4 @@
-# <!-- FLAG: project name --> RAG Service
+Groundwork — RAG from scratch, down to the auth layer.
  
 Ask natural-language questions over your own documents. The service ingests a
 document, splits it into chunks, embeds them locally, and stores the vectors. At
@@ -13,6 +13,10 @@ Built backend-first, it's deployed on [Hugging Face Spaces](https://haberric-rag
   sessions, opaque DB-backed session tokens, and Postgres row-level security so every tenant
   sees only its own documents. All credential/session writes go through `SECURITY DEFINER`
   SQL functions, so the least-privilege app role never touches the auth tables directly.
+- **Cookie-session web UI** — a dependency-free frontend (no framework, no build step)
+  with three real session states (logged-out / anonymous / registered), account and
+  document management, wired to the same SameSite=Lax cookie + same-origin `fetch`
+  posture the API enforces (no token in JS storage).
 - **Atomic ingest & delete** — documents, chunks and vectors live in one Postgres DB,
   so a store or a delete is a single transaction: it fully happens or fully rolls back,
   with no orphaned chunks or vectors.
@@ -36,7 +40,7 @@ The codebase is split into two layers:
 
 - **Stores** (`DocStore`, `ChunkStore`, `PgVectorStore`) — own persistence only. Each
   is stateless and receives a session as an argument; it does not own or open it.
-- **Services** (`IngestionService`, `RetrievalService`, `QueryService`) — own the
+- **Services** (`IngestionService`, `RetrievalService`, `AnswerService`) — own the
   business logic and orchestrate stores.
 
 ORM objects never escape the store layer; they're converted to DTOs at the boundary
@@ -135,8 +139,9 @@ docker compose up api
 
 Once it's up (Compose publishes the app on host port **8080** → `8080:8000`):
 
-- 🏠 Homepage (portfolio + contact) → <http://localhost:8080/>
-- 🧪 Live demo (ingest → retrieve → answer) → <http://localhost:8080/demo.html>
+- 🏠 Homepage (overview + contact) → <http://localhost:8080/>
+- 🖥️ Web app — register or continue anonymously, ingest documents, ask questions, and
+  manage your account & documents → <http://localhost:8080/demo.html>
 - 📖 Interactive docs (Swagger) → <http://localhost:8080/docs>
 
 The database schema is applied by the Alembic migrations in step 2 (the pgvector extension;
@@ -178,7 +183,7 @@ curl -c cookies.txt -X POST http://localhost:8080/anonymous_login
 # → "Anonymous login successful. Welcome!"
 
 # 1. Ingest a document — returns the doc id
-curl -b cookies.txt -c cookies.txt -X POST http://localhost:8080/ingest/store \
+curl -b cookies.txt -c cookies.txt -X POST http://localhost:8080/store \
   -H "Content-Type: application/json" \
   -d '{
         "filename": "pangram.txt",
@@ -218,7 +223,7 @@ src/rag_app/
   embeddings/   # sentence-transformers wrapper
   llm/          # LLM client + factory + prompter
   db/           # engine, base
-  static/       # homepage + demo frontend (plain HTML/CSS/JS, no build step)
+  static/       # homepage + web app UI: auth, account & document management, ingest/ask (plain HTML/CSS/JS, no build step)
 alembic/        # migrations: initial RLS schema, HNSW index, auth schema + SQL functions
 functions.sql   # reference copy of the SECURITY DEFINER auth functions (installed by the migration)
 tests/
