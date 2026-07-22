@@ -41,7 +41,7 @@ class RetrievalService:
             raise QueryTooLong(
                 f"Your query is too long {q_size}, max size for query is {self.chunker.max_size}"
             )
-        
+
         q_vector: list[float] = (await to_thread(self.embedder.embed_query, query))[0]
 
         k_vectors = await self.vec_store.search(session, q_vector, k, threshold)

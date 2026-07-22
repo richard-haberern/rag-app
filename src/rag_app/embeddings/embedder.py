@@ -47,9 +47,9 @@ class Embedder:
             )
         return max_seq - self.model.tokenizer.num_special_tokens_to_add()
 
-    # use the lock (both embed methods) so prevent that ST doesn't guarantee 
-    # that a single model is safe for concurrent calls - we run these from 
-    # a different thread so we don't block the event loop 
+    # use the lock (both embed methods) so prevent that ST doesn't guarantee
+    # that a single model is safe for concurrent calls - we run these from
+    # a different thread so we don't block the event loop
     def embed_document(self, texts: list[str]) -> list[Embedding]:
         with self._lock:
             emb = self.model.encode_document(

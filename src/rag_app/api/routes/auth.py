@@ -26,9 +26,11 @@ class Credentials(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=8, max_length=128)
 
+
 class MeModel(BaseModel):
-    authenticated: bool           # false for anonymous
-    username: str | None = None   # None for anonymous
+    authenticated: bool  # false for anonymous
+    username: str | None = None  # None for anonymous
+
 
 router = APIRouter()
 
@@ -153,16 +155,17 @@ async def delete_account(
     return "Your account has been successfully deleted."
 
 
-
 @router.get("/auth/me")
 async def authentication_state(
     db_session: Annotated[AsyncSession, Depends(get_db_session)],
     token: Annotated[str | None, Cookie(alias="session_token")] = None,
-    ) -> MeModel:
+) -> MeModel:
     if token is None:
         raise HTTPException(status_code=401)
     token_hash = _hash_token(token)
-    res = await db_session.execute(text("SELECT * FROM public.whoami(:token_hash)"), {"token_hash": token_hash})
+    res = await db_session.execute(
+        text("SELECT * FROM public.whoami(:token_hash)"), {"token_hash": token_hash}
+    )
     rows = res.first()
     if rows is None:
         # not a valid session
