@@ -580,9 +580,13 @@
         el("h1", null, "Open Groundwork directly"),
         el("p", null, "Groundwork is running inside an embedded frame. Its session cookie is SameSite=Lax and isn't sent inside a cross-origin frame, so login and the demo can't work here."),
         el("p", null, "Open it at its own URL to use it."),
-        el("button", {
-          class: "btn btn-primary", type: "button",
-          onclick: () => { window.top.location = window.location.href; },
+        // real link, not a JS top-navigation: the embedding iframe (e.g. HF Spaces)
+        // is sandboxed without allow-top-navigation, so assigning window.top.location
+        // throws SecurityError. A new tab only needs allow-popups, which embeds grant.
+        el("a", {
+          class: "btn btn-primary",
+          href: "https://haberric-groundwork.hf.space/",
+          target: "_blank", rel: "noopener",
         }, "Open Groundwork directly"))));
   }
 
