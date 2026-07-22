@@ -24,6 +24,7 @@ dist/
 .mypy_cache/
 
 # my personal log
+myfiles/**
 DEVLOG.md
 CLAUDE.md
 TODO.txt
@@ -33,3 +34,4 @@ functions.sql
 graphify-out/**/*
 
 .claude
+

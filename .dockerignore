@@ -1,18 +1,37 @@
-.venv
-.git
-**/__pycache__
-**/*.pyc
-**/.pytest_cache
-**/.mypy_cache
-**/.ruff_cache
+# secrets — the cardinal sin
 .env
-*.egg-info
-.env.ci
-tests/
-docker-compose*.yaml
-Dockerfile
-.dockerignore
-*.md
+*.env
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# local db data
+*.sqlite3
+
+# editor / os
+.vscode/
+.DS_Store
+
+# tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# my personal log
+myfiles/**
+DEVLOG.md
+CLAUDE.md
 TODO.txt
-.github/
 functions.sql
+
+#graphify
+graphify-out/**/*
+
+.claude
+
