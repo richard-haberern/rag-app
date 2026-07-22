@@ -59,8 +59,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Richies RAG-app",
-    description="This is v1 of my first real project RAG-app",
+    title="Groundwork",
+    description="RAG from scratch, down to the auth layer.",
     lifespan=lifespan,
 )
 app.include_router(ingest.router)
