@@ -3,72 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Demo · RAG App</title>
-  <meta name="description" content="Live demo: ingest a document, then ask a question and see the retrieved chunks and the generated answer.">
+  <title>Groundwork — app</title>
+  <meta name="description" content="Groundwork: ask natural-language questions grounded in your own documents. Sign in, browse anonymously, ingest text and get answers backed by vector retrieval.">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header class="site-header wrap">
-    <a class="brand" href="/">RAG App</a>
+    <a class="brand" href="/">Groundwork</a>
     <nav class="site-nav" aria-label="Site">
       <a href="/">Home</a>
       <a href="/docs">API docs</a>
     </nav>
   </header>
 
-  <main class="wrap">
-    <section aria-labelledby="ingest-heading">
-      <h2 id="ingest-heading">1 · Ingest a document</h2>
-      <p class="hint">
-        Paste any text — it gets chunked, embedded locally, and stored with its vectors.
-      </p>
-      <div class="card">
-        <form id="ingest-form">
-          <label for="ingest-filename">Document name</label>
-          <input id="ingest-filename" type="text" required placeholder="notes.txt" autocomplete="off">
-          <label for="ingest-content">Content</label>
-          <textarea id="ingest-content" required
-            placeholder="Paste a few paragraphs of text you want to ask questions about…"></textarea>
-          <button class="btn btn-primary" type="submit" id="ingest-btn">Ingest</button>
-        </form>
-        <p class="status" id="ingest-status" role="status" aria-live="polite"></p>
-      </div>
-    </section>
+  <div class="toast-wrap wrap"><div id="toast" class="toast" role="status" aria-live="polite" hidden></div></div>
 
-    <section aria-labelledby="query-heading">
-      <h2 id="query-heading">2 · Ask a question</h2>
-      <p class="hint">
-        The query is embedded and matched against every stored chunk (top-k similarity
-        search). The retrieved chunks below are the exact context the LLM answers from.
-      </p>
-      <div class="card">
-        <form id="query-form">
-          <label for="query-input">Question</label>
-          <input id="query-input" type="text" required autocomplete="off"
-            placeholder="What does the document say about…?">
-          <button class="btn btn-primary" type="submit" id="query-btn">Ask</button>
-        </form>
-
-        <div class="results">
-          <div>
-            <h3>Retrieved chunks</h3>
-            <p class="status" id="chunks-status" role="status" aria-live="polite"></p>
-            <ol class="chunk-list" id="chunk-list"></ol>
-          </div>
-          <div>
-            <h3>Answer</h3>
-            <p class="status" id="answer-status" role="status" aria-live="polite"></p>
-            <p class="answer-body" id="answer-body"></p>
-          </div>
-        </div>
-      </div>
-    </section>
+  <main id="app" class="wrap">
+    <!-- app.js mounts one of: logged-out / anonymous / registered / iframe-warning -->
+    <p class="status loading" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>Loading…
+    </p>
   </main>
 
   <footer class="site-footer">
-    <div class="wrap">RAG App v1 · <a href="/docs">OpenAPI docs</a></div>
+    <div class="wrap">Groundwork · <a href="/docs">OpenAPI docs</a></div>
   </footer>
 
-  <script src="/demo.js"></script>
+  <script src="/api.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>
