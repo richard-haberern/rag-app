@@ -478,6 +478,19 @@ documents→chunks→vectors). Registration and login-username races collapse to
 - CI installs via `uv sync --frozen` and invokes every tool through `uv run`
   (`uv run ruff/mypy/pytest/alembic`), so CI and local use the identical resolved env.
 
+**CPU-only torch (2026-07-22).**
+- `torch` (transitive via sentence-transformers) is pinned to the CPU wheel index
+  (`download.pytorch.org/whl/cpu`) via `[[tool.uv.index]]` + `[tool.uv.sources]` in
+  `pyproject.toml`. Embedding runs on CPU in dev and prod; the default PyPI resolution
+  pulled the CUDA 13 build — ~4.5 GB of GPU libs (torch-cu13 + `nvidia/*` + triton),
+  ~3 GB of downloads — for nothing.
+- Effect: ~200 MB torch download, venv 5.1 GB → 1.3 GB. `torch` is also declared in
+  `[project.dependencies]` (unversioned; sentence-transformers constrains it) because the
+  uv source pin does not apply to transitive-only packages.
+- Consequence: installing with plain `pip install .` would still fetch the CUDA build —
+  uv is the supported install path (already the case, see *Dependency management: uv*).
+- Revert condition: a GPU box for embedding throughput.
+
 ---
 
 ## Deferred / Out of Scope (v1)
