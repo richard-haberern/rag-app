@@ -14,4 +14,4 @@ jobs:
           curl --fail --silent --show-error \
             -X POST \
             -H "sweep-token: ${{ secrets.SWEEP_TOKEN }}" \
-            https://haberric-groundwork.space/admin/cleanup
+            https://haberric-groundwork.hf.space/admin/cleanup
