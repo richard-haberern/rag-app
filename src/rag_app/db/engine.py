@@ -11,7 +11,7 @@ from rag_app.config import get_settings
 
 # factory function that exposes engine
 def make_engine(url: str, poolclass: type[Pool] | None = None) -> AsyncEngine:
-    return create_async_engine(url, connect_args={"ssl": get_settings().db_ssl})
+    return create_async_engine(url, connect_args={"ssl": get_settings().db_ssl, "statement_cache_size": 0})
 
 
 # factory function that exposes the session_maker
