@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 from typing import Any
 from datetime import datetime
-
+from pydantic import BaseModel
 # A single embedding vector, kept as a plain type so nothing pgvector-specific leaks.
 Embedding = list[float]
 
@@ -32,3 +32,15 @@ class OwnerDTO:
     created_at: datetime
     # nullable in the DB: registered users have NULL; only anonymous mints set it.
     expires_at: datetime | None
+
+class Citation(BaseModel):
+    marker: int
+    content: str
+    document_id: UUID
+    filename: str
+    position: int
+
+
+class QueryAnswer(BaseModel):
+    content: str
+    chunks: list[Citation]

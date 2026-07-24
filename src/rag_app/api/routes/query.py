@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rag_app.api.deps import get_answerer, get_retriever, set_guc
 
-from rag_app.config import get_settings
 from rag_app.services.answerer import AnswerService
 from rag_app.services.retriever import RetrievalService
+from rag_app.schemas import QueryAnswer
+
 
 router = APIRouter(prefix="/query")
 
@@ -34,29 +35,15 @@ class GenerateRequest(BaseModel):
     query: str
 
 
+
 @router.post("/generate")
 async def generate_answer(
     q: GenerateRequest,
     answerer: Annotated[AnswerService, Depends(get_answerer)],
     session: Annotated[AsyncSession, Depends(set_guc)],
-) -> str:
+) -> QueryAnswer:
     return await answerer.get_answer(session, q.query)
-
-
-# Additive endpoint for the demo frontend: exposes what retrieval found for a query.
-# Same k/threshold defaults as AnswerService.get_answer; returns chunk contents in
-# similarity order (scores never cross the service boundary).
-@router.post("/retrieve")
-async def retrieve_chunks(
-    q: GenerateRequest,
-    retriever: Annotated[RetrievalService, Depends(get_retriever)],
-    session: Annotated[AsyncSession, Depends(set_guc)],
-) -> list[str]:
-    s = get_settings()
-    return await retriever.search_topk_chunks(
-        session, q.query, s.retrieval_top_k, s.retrieval_threshold
-    )
-
+    
 
 @router.get("/documents/{doc_id}")
 async def get_document(

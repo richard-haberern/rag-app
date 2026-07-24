@@ -59,6 +59,9 @@ class DocStore:
         result = await session.execute(select(Document.id).order_by(Document.id))
         return result.scalars().all()
 
+    async def get_filename_by_ids(self, session: AsyncSession, ids: Sequence[UUID]) -> dict[UUID, str]:
+        result = await session.execute(select(Document.id, Document.filename).where(Document.id.in_(ids))) 
+        return {row.id: row.filename for row in result}
     async def remove_document(self, session: AsyncSession, id: UUID) -> None:
         doc = await session.get(Document, id)
         if doc is None:

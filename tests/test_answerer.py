@@ -11,7 +11,7 @@ from rag_app.chunkings.chunker import Chunker
 from rag_app.services.answerer import AnswerService
 from rag_app.services.retriever import RetrievalService
 from rag_app.llm.llm_client import LLMClient
-
+from rag_app.schemas import QueryAnswer
 
 _NO_CONTEXT_MSG = "There is not enough context to generate a good answer."
 
@@ -46,4 +46,4 @@ async def test_get_answer_no_context_skips_llm(
     finally:
         await client.aclose()
 
-    assert resp == _NO_CONTEXT_MSG
+    assert resp == QueryAnswer(content=_NO_CONTEXT_MSG, chunks=[])

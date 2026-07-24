@@ -80,12 +80,14 @@
 
     // Documents
     listDocuments: () => getJSON("/query/stored_documents/metadata"), // [{filename, doc_id, doc_metadata}]
+    getDocument: (docId) => getJSON("/query/documents/" + encodeURIComponent(docId)), // {filename, content, doc_id, doc_metadata}
     deleteDocument: (docId) => del("/delete/" + encodeURIComponent(docId)), // 204
     ingest: (content, filename) => postJSON("/store", { content, filename, metadata: {} }), // -> uuid
 
     // Query
-    retrieve: (query) => postJSON("/query/retrieve", { query }), // -> [str]
-    generate: (query) => postJSON("/query/generate", { query }), // -> str
+    // Retrieval and generation are one call now: the answer carries inline [[i]] markers,
+    // and `chunks` is every retrieved passage (marker 1..n) so the UI can show cited sources.
+    generate: (query) => postJSON("/query/generate", { query }), // -> {content, chunks: [{marker, content, document_id, filename, position}]}
   };
 
   window.API = API;

@@ -143,6 +143,52 @@
     });
   }
 
+  // ---------- info modal (Close-only, for viewing content) ----------
+  // Separate from confirmDialog so the auth/delete confirm flows stay untouched. Mirrors
+  // its Escape / overlay-click / focus-restore behaviour. Returns setBody() so a caller can
+  // open it in a loading state and fill it once an async fetch resolves.
+
+  function infoDialog(title, bodyNode) {
+    const previouslyFocused = document.activeElement;
+    function close() {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus({ preventScroll: true });
+    }
+    function onKey(e) {
+      if (e.key === "Escape") { close(); return; }
+      if (e.key !== "Tab") return;
+      // trap Tab within the dialog so focus can't walk onto the obscured page behind it
+      const focusable = dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      const first = focusable[0], lastF = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); lastF.focus(); }
+      else if (!e.shiftKey && document.activeElement === lastF) { e.preventDefault(); first.focus(); }
+    }
+
+    // aria-live so async content (or the in-modal error) is announced after the swap
+    const body = el("div", { class: "modal-body", "aria-live": "polite" }, bodyNode);
+    const closeBtn = el("button", { class: "btn btn-secondary", type: "button", onclick: close }, "Close");
+    const dialog = el("div", {
+      class: "modal modal-lg", role: "dialog", "aria-modal": "true", "aria-labelledby": "info-modal-title",
+    },
+      el("h2", { id: "info-modal-title" }, title),
+      body,
+      el("div", { class: "modal-actions" }, closeBtn));
+    const overlay = el("div", { class: "modal-overlay", onclick: (e) => { if (e.target === overlay) close(); } }, dialog);
+
+    document.addEventListener("keydown", onKey);
+    document.body.append(overlay);
+    closeBtn.focus({ preventScroll: true });
+    return { close, setBody: (node) => body.replaceChildren(node) };
+  }
+
+  function loadingNode(text) {
+    return el("p", { class: "status loading" },
+      el("span", { class: "spinner", "aria-hidden": "true" }),
+      document.createTextNode(text));
+  }
+
   // ---------- shared workspace: ingest + ask + documents ----------
   // Used by both the anonymous and registered views (identical capability — both have a
   // valid session and are RLS-scoped to their own owner). Returns the node plus a
@@ -183,36 +229,109 @@
       el("div", { class: "card" }, ingestForm, ingestStatus));
 
     // -- ask --
+    // Retrieval + generation are one call. The answer text carries inline [[i]] markers;
+    // `chunks` is every retrieved passage (marker 1..n). We render the markers as clickable
+    // citation badges that cross-highlight a Sources panel showing only the cited passages.
     const queryInput = el("input", { id: "query-input", type: "text", required: true, autocomplete: "off", placeholder: "What does the document say about…?" });
     const queryBtn = el("button", { class: "btn btn-primary", type: "submit" }, "Ask");
-    const chunksStatus = el("p", { class: "status", role: "status", "aria-live": "polite" });
-    const chunkList = el("ol", { class: "chunk-list" });
-    const answerStatus = el("p", { class: "status", role: "status", "aria-live": "polite" });
-    const answerBody = el("p", { class: "answer-body" });
+    const queryStatus = el("p", { class: "status", role: "status", "aria-live": "polite" });
+    const answerBody = el("div", { class: "answer-body" });
+    const sourceList = el("div", { class: "source-list" });
+    const sourcesWrap = el("div", { class: "sources", hidden: true }, el("h3", null, "Sources"), sourceList);
 
-    async function showChunks(query) {
-      try {
-        const chunks = await API.retrieve(query);
-        if (chunks.length === 0) {
-          setStatus(chunksStatus, "error", "No chunks passed the similarity threshold — add something related to the question first.");
-          return;
-        }
-        setStatus(chunksStatus, "", "");
-        chunks.forEach((text, i) => {
-          chunkList.append(el("li", null, el("span", { class: "chunk-rank" }, "#" + (i + 1)), document.createTextNode(text)));
-        });
-      } catch (err) {
-        setStatus(chunksStatus, "error", queryErrorText(err, "retrieval"));
-      }
+    const MARKER_RE = /\[\[(\d+)\]\]/g;
+
+    // Add/remove the highlight on both sides of a citation link (all inline badges for a
+    // marker + its source card), keyed by the original marker value on data-marker.
+    function setHighlight(marker, on) {
+      const card = sourceList.querySelector('.source-card[data-marker="' + marker + '"]');
+      if (card) card.classList.toggle("is-highlighted", on);
+      answerBody.querySelectorAll('.cite-badge[data-marker="' + marker + '"]').forEach((b) => b.classList.toggle("is-highlighted", on));
     }
-    async function showAnswer(query) {
-      try {
-        const answer = await API.generate(query);
-        setStatus(answerStatus, "", "");
-        answerBody.textContent = answer;
-      } catch (err) {
-        setStatus(answerStatus, "error", queryErrorText(err, "generation"));
+
+    function citeBadge(marker, displayNo, filename) {
+      return el("button", {
+        class: "cite-badge", type: "button", "data-marker": String(marker),
+        title: filename, "aria-label": "Source " + displayNo + ": " + filename,
+        onclick: () => {
+          const card = sourceList.querySelector('.source-card[data-marker="' + marker + '"]');
+          if (!card) return;
+          const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+          card.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "nearest" });
+          card.focus({ preventScroll: true }); // move SR/keyboard cursor to the cited passage
+        },
+        onmouseenter: () => setHighlight(marker, true),
+        onmouseleave: () => setHighlight(marker, false),
+        onfocus: () => setHighlight(marker, true),
+        onblur: () => setHighlight(marker, false),
+      }, String(displayNo));
+    }
+
+    function sourceCard(displayNo, marker, chunk) {
+      return el("div", {
+        class: "source-card", tabindex: "-1", "data-marker": marker == null ? null : String(marker),
+        onmouseenter: marker == null ? null : () => setHighlight(marker, true),
+        onmouseleave: marker == null ? null : () => setHighlight(marker, false),
+      },
+        el("div", { class: "source-head" },
+          el("span", { class: "source-no" }, displayNo),
+          el("span", { class: "source-file" }, chunk.filename || "(untitled)")),
+        el("div", { class: "source-text" }, chunk.content));
+    }
+
+    // No marker in the answer mapped to a passage: show a note and let the user reveal all
+    // retrieved passages (which the endpoint still returns) instead of hiding retrieval.
+    function emptySources(chunks) {
+      const wrap = el("div", { class: "sources-empty" },
+        el("p", { class: "hint" }, "The answer didn't cite specific passages."));
+      const revealed = el("div", { class: "source-list", id: "revealed-sources", hidden: true });
+      chunks.forEach((c, i) => revealed.append(sourceCard("#" + (i + 1), null, c)));
+      const toggle = el("button", { class: "linklike", type: "button", "aria-expanded": "false", "aria-controls": "revealed-sources" });
+      function label() {
+        const shown = !revealed.hidden;
+        toggle.setAttribute("aria-expanded", String(shown));
+        toggle.textContent = shown
+          ? "▾ Hide retrieved passages"
+          : "▸ Show all " + chunks.length + " retrieved passage" + (chunks.length === 1 ? "" : "s");
       }
+      toggle.addEventListener("click", () => { revealed.hidden = !revealed.hidden; label(); });
+      label();
+      wrap.append(toggle, revealed);
+      return wrap;
+    }
+
+    function renderAnswer(content, chunks) {
+      answerBody.replaceChildren();
+      sourceList.replaceChildren();
+
+      const byMarker = new Map(chunks.map((c) => [c.marker, c]));
+      // markers actually present in the answer, first-appearance order, deduped, known only
+      const citedOrder = [];
+      const seen = new Set();
+      for (const m of content.matchAll(MARKER_RE)) {
+        const marker = Number(m[1]);
+        if (byMarker.has(marker) && !seen.has(marker)) { seen.add(marker); citedOrder.push(marker); }
+      }
+      const displayNo = new Map(citedOrder.map((marker, i) => [marker, i + 1]));
+
+      // interleave answer text with badges; an unknown marker is dropped (defensive)
+      let last = 0, match;
+      MARKER_RE.lastIndex = 0;
+      while ((match = MARKER_RE.exec(content)) !== null) {
+        if (match.index > last) answerBody.append(document.createTextNode(content.slice(last, match.index)));
+        const marker = Number(match[1]);
+        if (displayNo.has(marker)) answerBody.append(citeBadge(marker, displayNo.get(marker), byMarker.get(marker).filename));
+        last = MARKER_RE.lastIndex;
+      }
+      if (last < content.length) answerBody.append(document.createTextNode(content.slice(last)));
+
+      if (chunks.length === 0) { sourcesWrap.hidden = true; return 0; }
+      sourcesWrap.hidden = false;
+      if (citedOrder.length === 0) { sourceList.append(emptySources(chunks)); return 0; }
+      for (const marker of citedOrder) {
+        sourceList.append(sourceCard("[" + displayNo.get(marker) + "]", marker, byMarker.get(marker)));
+      }
+      return citedOrder.length;
     }
 
     const queryForm = el("form", {
@@ -220,23 +339,31 @@
         e.preventDefault();
         const query = queryInput.value;
         queryBtn.disabled = true;
-        chunkList.replaceChildren();
-        answerBody.textContent = "";
-        setStatus(chunksStatus, "loading", "Searching vectors…");
-        setStatus(answerStatus, "loading", "Retrieving + generating (the LLM can take a while)…");
-        await Promise.allSettled([showChunks(query), showAnswer(query)]);
-        queryBtn.disabled = false;
+        answerBody.replaceChildren();
+        sourceList.replaceChildren();
+        sourcesWrap.hidden = true;
+        setStatus(queryStatus, "loading", "Retrieving + generating (the LLM can take a while)…");
+        try {
+          const { content, chunks } = await API.generate(query);
+          const cited = renderAnswer(content, chunks);
+          // announce completion in the live region — the answer body itself isn't live
+          setStatus(queryStatus, "", cited ? cited + " source" + (cited === 1 ? "" : "s") + " cited." : "Answer ready.");
+        } catch (err) {
+          setStatus(queryStatus, "error", queryErrorText(err, "generation"));
+        } finally {
+          queryBtn.disabled = false;
+        }
       },
     },
       el("label", { for: "query-input" }, "Question"), queryInput, queryBtn);
 
     const askSection = el("section", { "aria-labelledby": "query-heading" },
       el("h2", { id: "query-heading" }, "Ask a question"),
-      el("p", { class: "hint" }, "Your question is embedded and matched against every stored chunk. The retrieved chunks are the exact context the LLM answers from."),
+      el("p", { class: "hint" }, "Your question is embedded and matched against your stored chunks; the LLM answers only from what it retrieves. Each citation links a claim back to the passage it came from."),
       el("div", { class: "card" }, queryForm,
         el("div", { class: "results" },
-          el("div", null, el("h3", null, "Retrieved chunks"), chunksStatus, chunkList),
-          el("div", null, el("h3", null, "Answer"), answerStatus, answerBody))));
+          el("div", null, el("h3", null, "Answer"), queryStatus, answerBody),
+          sourcesWrap)));
 
     // -- documents --
     const docStatus = el("p", { class: "status", role: "status", "aria-live": "polite" });
@@ -291,9 +418,26 @@
       },
     }, "Delete");
 
+    async function openDoc() {
+      const dlg = infoDialog(doc.filename || "(untitled)", loadingNode("Loading content…"));
+      try {
+        const full = await API.getDocument(doc.doc_id);
+        dlg.setBody(full.content
+          ? el("div", { class: "doc-content" }, full.content)
+          : el("p", { class: "hint" }, "This document has no content."));
+      } catch (err) {
+        dlg.setBody(el("p", { class: "status error" },
+          err.status === 404 ? "That document no longer exists." : (err.message || "Couldn't load the document.")));
+      }
+    }
+
+    const nameBtn = el("button", {
+      class: "doc-name doc-name-btn", type: "button", title: "View content", onclick: openDoc,
+    }, doc.filename || "(untitled)");
+
     return el("li", { class: "doc-row" },
       el("div", { class: "doc-main" },
-        el("span", { class: "doc-name" }, doc.filename || "(untitled)"),
+        nameBtn,
         el("span", { class: "doc-id", title: String(doc.doc_id) }, String(doc.doc_id)),
         metaEntries.length
           ? el("span", { class: "doc-meta" }, metaEntries.map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "))

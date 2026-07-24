@@ -7,12 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rag_app.chunkings.chunker import Chunker
 from rag_app.embeddings.embedder import Embedder
-from rag_app.schemas import DocumentDTO
+from rag_app.schemas import DocumentDTO, ChunkDTO
 from rag_app.stores.chunk_store import ChunkStore
 from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import QueryTooLong
-
 
 class RetrievalService:
     # all DI
@@ -32,7 +31,7 @@ class RetrievalService:
 
     async def search_topk_chunks(
         self, session: AsyncSession, query: str, k: int, threshold: float
-    ) -> list[str]:
+    ) -> list[tuple[ChunkDTO, str]]:
         # add_special_tokens=False matches max_size (the content-token window the chunker uses).
         q_size = len(
             self.chunker.tokenizer(query, add_special_tokens=False)["input_ids"]
@@ -50,13 +49,12 @@ class RetrievalService:
         )
         # have to sort chunks by the vectors -> O(n)
         by_id = {ch.id: ch for ch in k_chunks}
-        ordered_content = [
-            by_id[ch_id].content for ch_id, _ in k_vectors if ch_id in by_id
+        ordered = [
+            by_id[ch_id] for ch_id, _ in k_vectors if ch_id in by_id
         ]
-        return ordered_content
+        names = await self.doc_store.get_filename_by_ids(session, list({c.document_id for c in ordered}))
+        return [(c, names.get(c.document_id, "")) for c in ordered]
 
-    async def get_document_content(self, session: AsyncSession, id: UUID) -> str:
-        return await self.doc_store.get_document_content(session, id)
 
     async def get_document(self, session: AsyncSession, id: UUID) -> DocumentDTO:
         return await self.doc_store.get_document(session, id)
