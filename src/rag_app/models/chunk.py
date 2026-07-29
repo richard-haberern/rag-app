@@ -26,6 +26,8 @@ class Chunk(Base):
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("documents.id", ondelete="CASCADE")
     )
+    offset_start: Mapped[int]
+    offset_end: Mapped[int]
 
     original_document: Mapped["Document"] = relationship(back_populates="chunks")
     vector: Mapped["Vector"] = relationship(

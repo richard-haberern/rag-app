@@ -16,6 +16,8 @@ def _to_dto(chunk: Chunk) -> ChunkDTO:
         content=chunk.content,
         document_id=chunk.document_id,
         position=chunk.position,
+        offset_start=chunk.offset_start,
+        offset_end=chunk.offset_end
     )
 
 
@@ -30,6 +32,8 @@ class ChunkStore:
                     content=c.content,
                     document_id=c.document_id,
                     position=c.position,
+                    offset_start=c.offset_start,
+                    offset_end=c.offset_end
                 )
                 for c in chunks
             ]

@@ -24,6 +24,8 @@ class ChunkDTO:
     content: str
     document_id: UUID
     position: int
+    offset_start: int
+    offset_end: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,12 @@ class OwnerDTO:
     created_at: datetime
     # nullable in the DB: registered users have NULL; only anonymous mints set it.
     expires_at: datetime | None
+
+@dataclass(frozen=True, slots=True)
+class ChunkOffsets:
+    content: str
+    char_start: int
+    char_end: int
 
 class Citation(BaseModel):
     marker: int

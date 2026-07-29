@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+from rag_app.schemas import ChunkOffsets
 
 if TYPE_CHECKING:
     # Type-only import: transformers is already pulled in transitively by sentence-transformers,
@@ -25,7 +26,7 @@ class Chunker:
         self.max_size = max_size
         self.overlap = overlap
 
-    def chunk_text(self, text: str) -> list[str]:
+    def chunk_text(self, text: str) -> list[ChunkOffsets]:
         out = self.tokenizer(
             text, return_offsets_mapping=True, add_special_tokens=False
         )
@@ -35,15 +36,15 @@ class Chunker:
             return []
         char_start = char_end = 0
         tok_start = tok_end = 0
-        ret: list[str] = []
+        ret: list[ChunkOffsets] = []
         while True:
             if tok_start + self.max_size >= len(offsets):
                 char_start = offsets[tok_start][0]
-                ret.append(text[char_start:])
+                ret.append(ChunkOffsets(text[char_start:], char_start, len(text)))
                 return ret
 
             tok_end = tok_start + self.max_size
             char_start = offsets[tok_start][0]
             char_end = offsets[tok_end - 1][1]
-            ret.append(text[char_start:char_end])
+            ret.append(ChunkOffsets(text[char_start:char_end], char_start, char_end))
             tok_start = tok_end - self.overlap
