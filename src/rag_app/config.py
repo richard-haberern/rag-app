@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     def test_app_sqlalchemy_url(self) -> str:
         if self.test_app_database_url is None:
             raise ValueError(
-                "APP_DATABASE_URL_TEST is required to build the app_user test database URL"
+                "TEST_APP_SQLALCHEMY_URL is required to build the app_user test database URL"
             )
         return self.test_app_database_url
 
