@@ -101,7 +101,10 @@ async def test_e2e(
         found_k = await retriever.search_topk_chunks(
             s, "What is the meaning of life?", 3, 2.0
         )
-    assert found_k[0][0].content == "Meaning of life is someting noone can answer excpet C++"
+    assert (
+        found_k[0][0].content
+        == "Meaning of life is someting noone can answer excpet C++"
+    )
     assert found_k[1][0].content == "Life is beautiful."
     assert found_k[2][0].content == "Sun is shining"
     assert found_k[0][1] == "doc.txt"

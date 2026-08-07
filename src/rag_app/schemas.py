@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import Any
 from datetime import datetime
 from pydantic import BaseModel
+
 # A single embedding vector, kept as a plain type so nothing pgvector-specific leaks.
 Embedding = list[float]
 
@@ -35,11 +36,13 @@ class OwnerDTO:
     # nullable in the DB: registered users have NULL; only anonymous mints set it.
     expires_at: datetime | None
 
+
 @dataclass(frozen=True, slots=True)
 class ChunkOffsets:
     content: str
     char_start: int
     char_end: int
+
 
 class Citation(BaseModel):
     marker: int

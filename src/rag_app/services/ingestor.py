@@ -42,12 +42,16 @@ class IngestionService:
         # create chunks
         chunks: list[ChunkOffsets] = self.chunker.chunk_text(document.content)
         chunk_dtos: list[ChunkDTO] = [
-            ChunkDTO(uuid4(), ch.content, document.id, position, ch.char_start, ch.char_end)
+            ChunkDTO(
+                uuid4(), ch.content, document.id, position, ch.char_start, ch.char_end
+            )
             for position, ch in enumerate(chunks)
         ]
         # callable then arg - so it can run on a different event loop and
         # not block it
-        vectors = await to_thread(self.embedder.embed_document, [ch.content for ch in chunks])
+        vectors = await to_thread(
+            self.embedder.embed_document, [ch.content for ch in chunks]
+        )
         # Single atomic transaction: document, chunks and vectors all live in Postgres,
         # so they commit or roll back together - no orphan-vector window. The exists()
         # pre-check above handles the common case; the IntegrityError guard covers the

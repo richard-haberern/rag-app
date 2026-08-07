@@ -13,6 +13,7 @@ from rag_app.stores.document_store import DocStore
 from rag_app.stores.pg_vector_store import PgVectorStore
 from rag_app.exceptions import QueryTooLong
 
+
 class RetrievalService:
     # all DI
     def __init__(
@@ -49,12 +50,11 @@ class RetrievalService:
         )
         # have to sort chunks by the vectors -> O(n)
         by_id = {ch.id: ch for ch in k_chunks}
-        ordered = [
-            by_id[ch_id] for ch_id, _ in k_vectors if ch_id in by_id
-        ]
-        names = await self.doc_store.get_filename_by_ids(session, list({c.document_id for c in ordered}))
+        ordered = [by_id[ch_id] for ch_id, _ in k_vectors if ch_id in by_id]
+        names = await self.doc_store.get_filename_by_ids(
+            session, list({c.document_id for c in ordered})
+        )
         return [(c, names.get(c.document_id, "")) for c in ordered]
-
 
     async def get_document(self, session: AsyncSession, id: UUID) -> DocumentDTO:
         return await self.doc_store.get_document(session, id)

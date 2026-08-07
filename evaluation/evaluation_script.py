@@ -13,7 +13,7 @@ from rag_app.api._helpers import _get_new_token, _hash_token
 from sqlalchemy import text, delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncEngine
 from uuid import UUID, uuid4
-from dataclasses import dataclass 
+from dataclasses import dataclass
 from rag_app.schemas import DocumentDTO
 from rag_app.models import Document
 from collections import defaultdict
@@ -31,7 +31,14 @@ CHUNK_SIZES = [64, 128, 192, 254]
 CORPUS_ROOT = Path(__file__).parent / "corpus" / "fastapi-docs"
 # Fixed print order so successive runs diff cleanly. "unanswerable" is absent on purpose: it is
 # filtered out before the sweep (no gold spans -> no retrieval signal).
-TIER_ORDER = ["lexical", "paraphrase", "vocabulary-shift", "needle", "multi-hop", "distractor"]
+TIER_ORDER = [
+    "lexical",
+    "paraphrase",
+    "vocabulary-shift",
+    "needle",
+    "multi-hop",
+    "distractor",
+]
 METRICS = ["recall", "precision", "mrr", "chars"]
 
 
@@ -46,11 +53,13 @@ class Identity:
     username: str | None = None
     password: str | None = None
 
+
 @dataclass(frozen=True)
 class Rig:
     chunker: Chunker
     ingestor: IngestionService
     retriever: RetrievalService
+
 
 @dataclass(frozen=True)
 class Lifespan:
@@ -62,6 +71,7 @@ class Lifespan:
     doc_store: DocStore
     services: dict
     tenants: dict
+
 
 @asynccontextmanager
 async def setup():
@@ -78,24 +88,24 @@ async def setup():
         chunker = build_chunker(embedder, cfg)
         services[ch_size] = Rig(
             chunker,
-            IngestionService(
-                doc_store,
-                chunk_store,
-                vec_store,
-                embedder,
-                chunker), 
-            RetrievalService(
-                chunk_store,
-                vec_store,
-                doc_store,
-                embedder,
-                chunker)
+            IngestionService(doc_store, chunk_store, vec_store, embedder, chunker),
+            RetrievalService(chunk_store, vec_store, doc_store, embedder, chunker),
         )
         anonym = await make_anonymous_tenant(session_maker)
         tenants[ch_size] = anonym.owner_id
-    lifespan = Lifespan(engine=engine, session_maker=session_maker, embedder=embedder, vec_store=vec_store, chunk_store=chunk_store, doc_store=doc_store, services=services, tenants=tenants)
+    lifespan = Lifespan(
+        engine=engine,
+        session_maker=session_maker,
+        embedder=embedder,
+        vec_store=vec_store,
+        chunk_store=chunk_store,
+        doc_store=doc_store,
+        services=services,
+        tenants=tenants,
+    )
     yield lifespan
     await lifespan.engine.dispose()
+
 
 @asynccontextmanager
 async def app_session(session_maker: async_sessionmaker, owner_id: UUID | None = None):
@@ -106,7 +116,7 @@ async def app_session(session_maker: async_sessionmaker, owner_id: UUID | None =
                 {"id": str(owner_id)},
             )
         yield s
-         
+
 
 async def make_anonymous_tenant(session_maker: async_sessionmaker):
     token = _get_new_token()
@@ -117,13 +127,16 @@ async def make_anonymous_tenant(session_maker: async_sessionmaker):
         )
         owner_id = res.scalar_one()
     return Identity(owner_id=owner_id, token=token)
-     
 
-async def process_corpus(lifespan: Lifespan, documents: list[DocumentDTO], ch_size: int):
-    async with app_session(lifespan.session_maker, lifespan.tenants[ch_size]) as s:    
-        for doc in documents:    
+
+async def process_corpus(
+    lifespan: Lifespan, documents: list[DocumentDTO], ch_size: int
+):
+    async with app_session(lifespan.session_maker, lifespan.tenants[ch_size]) as s:
+        for doc in documents:
             await lifespan.services[ch_size].ingestor.store_document(s, doc)
-        
+
+
 async def cleanup(lifespan: Lifespan):
     # documents is FORCE RLS under the owner_isolation policy, which compares owner_id against
     # current_setting('app.owner_id'). An unscoped session leaves that unset, so the predicate is
@@ -191,13 +204,18 @@ def get_golds(corpus_text: dict[str, str]) -> list[dict]:
     with open(Path(__file__).parent / "goldens.jsonl") as f:
         for line in f:
             g = json.loads(line)
-            ret.append({
-                "id": g["id"],
-                "tier": g["tier"],
-                "query": g["query"],
-                "answers": [_resolve_answer(g["id"], a, corpus_text) for a in g["answers"]],
-            })
+            ret.append(
+                {
+                    "id": g["id"],
+                    "tier": g["tier"],
+                    "query": g["query"],
+                    "answers": [
+                        _resolve_answer(g["id"], a, corpus_text) for a in g["answers"]
+                    ],
+                }
+            )
     return ret
+
 
 def get_corpus() -> list[DocumentDTO]:
     docs = []
@@ -208,7 +226,15 @@ def get_corpus() -> list[DocumentDTO]:
         # filename is the join key against a golden's "document" field, so it has to be the
         # corpus-relative path: index.md / middleware.md / websockets.md each exist several times.
         filename = p.relative_to(CORPUS_ROOT).as_posix()
-        docs.append(DocumentDTO(id=uuid4(), filename=filename, content_hash=sha256(raw).hexdigest(), content=raw.decode("utf-8"), owner_id=uuid4()))
+        docs.append(
+            DocumentDTO(
+                id=uuid4(),
+                filename=filename,
+                content_hash=sha256(raw).hexdigest(),
+                content=raw.decode("utf-8"),
+                owner_id=uuid4(),
+            )
+        )
     return docs
 
 
@@ -240,35 +266,59 @@ def report(results: list[dict]) -> None:
         "\nwhen one hop of two is retrieved, so a single mean hides the effect the sweep measures."
     )
 
+
 async def main():
     documents = get_corpus()
     # Resolve the goldens before setup(): a bad quote should fail in a second, not after ingesting
     # the whole corpus at five chunk sizes.
     golds = [
-        g for g in get_golds({d.filename: d.content for d in documents})
+        g
+        for g in get_golds({d.filename: d.content for d in documents})
         if g["tier"] != "unanswerable"
     ]
-    results = []   
+    results = []
     async with setup() as lifespan:
         for ch_size in lifespan.services.keys():
-            await process_corpus(lifespan, [DocumentDTO(uuid4(), d.filename, d.content_hash, d.content, lifespan.tenants[ch_size]) for d in documents], ch_size)
+            await process_corpus(
+                lifespan,
+                [
+                    DocumentDTO(
+                        uuid4(),
+                        d.filename,
+                        d.content_hash,
+                        d.content,
+                        lifespan.tenants[ch_size],
+                    )
+                    for d in documents
+                ],
+                ch_size,
+            )
         for g in golds:
             for ch_size in CHUNK_SIZES:
-                async with app_session(lifespan.session_maker, lifespan.tenants[ch_size]) as s:
-                    res = await lifespan.services[ch_size].retriever.search_topk_chunks(s, g["query"], max(K_VALUES), get_settings().retrieval_threshold)
+                async with app_session(
+                    lifespan.session_maker, lifespan.tenants[ch_size]
+                ) as s:
+                    res = await lifespan.services[ch_size].retriever.search_topk_chunks(
+                        s, g["query"], max(K_VALUES), get_settings().retrieval_threshold
+                    )
                     for k in K_VALUES:
                         k_res = res[:k]
-                        spans  = [Span(doc_name, chunk.offset_start, chunk.offset_end) for chunk, doc_name in k_res]
-                        results.append({
-                            "chunk_size": ch_size,
-                            "tier":       g["tier"],
-                            "qid":        g["id"],
-                            "k":          k,
-                            "recall":     recall(g["answers"], spans, tau=0.5),
-                            "precision":  precision(g["answers"], spans),
-                            "mrr":        reciprocal_rank(g["answers"], spans),
-                            "chars":      sum(s.char_end - s.char_start for s in spans),
-                        })
+                        spans = [
+                            Span(doc_name, chunk.offset_start, chunk.offset_end)
+                            for chunk, doc_name in k_res
+                        ]
+                        results.append(
+                            {
+                                "chunk_size": ch_size,
+                                "tier": g["tier"],
+                                "qid": g["id"],
+                                "k": k,
+                                "recall": recall(g["answers"], spans, tau=0.5),
+                                "precision": precision(g["answers"], spans),
+                                "mrr": reciprocal_rank(g["answers"], spans),
+                                "chars": sum(s.char_end - s.char_start for s in spans),
+                            }
+                        )
         await cleanup(lifespan)
     report(results)
 

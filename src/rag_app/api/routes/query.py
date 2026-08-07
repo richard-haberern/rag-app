@@ -35,7 +35,6 @@ class GenerateRequest(BaseModel):
     query: str
 
 
-
 @router.post("/generate")
 async def generate_answer(
     q: GenerateRequest,
@@ -43,7 +42,7 @@ async def generate_answer(
     session: Annotated[AsyncSession, Depends(set_guc)],
 ) -> QueryAnswer:
     return await answerer.get_answer(session, q.query)
-    
+
 
 @router.get("/documents/{doc_id}")
 async def get_document(
