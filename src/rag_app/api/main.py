@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -22,7 +22,7 @@ from rag_app.exceptions import AppError
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Runtime connects as the least-privilege app_user (APP_DATABASE_URL) so RLS applies;
     # Schema (extension + tables + RLS + grants)
     # is owned by Alembic and must be applied (alembic upgrade head, as the owner) before boot
