@@ -12,6 +12,9 @@ def build_llm_client(
     Single place that reads LLM config and enforces the api key is present. The client is injected
     (DI, testable) but bare; this wires the auth header + timeout onto it from Settings, so LLMClient
     stays free of config. Mirrors build_chunker. Caller owns the client's lifecycle (close).
+
+    Note the split LLMClient's docstring relies on: this function is the only thing that configures
+    the client, and it does so by mutating an object the caller still holds.
     """
     settings = settings or get_settings()
     if settings.llm_api_key is None:
