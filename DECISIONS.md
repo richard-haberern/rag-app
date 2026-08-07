@@ -218,6 +218,23 @@ deferred is intentionally out of scope for v2 — see the final section.
   - `LLMError` (502, upstream): wraps **all** httpx failures (status, timeout, connection)
     raised in `LLMClient.generate`, plus `LLMBadAnswer` for a malformed 200 body. Reports
     the upstream status code only — `str(exc)` would leak the Gemini URL.
+- **Exception messages are response bodies.** The single handler does
+  `content={"detail": str(exc)}`, so anything passed to an `AppError` constructor is published
+  verbatim. `LLMClient` therefore raises with **static** messages and never interpolates the
+  upstream payload. Non-hypothetical: `_extract_text` used to format `{data!r}` into
+  `LLMBadAnswer`, and since the prompt is assembled from retrieved chunks, a safety-blocked
+  response could echo the user's own document text (plus `promptFeedback` and model internals)
+  into a 502 body. Cost accepted for now: **no** diagnostic survives a safety block beyond the
+  chained `KeyError` in a local traceback. Logging is the real fix and is deferred — there is no
+  `logging` anywhere in `src/`, and introducing it is a repo-wide pattern decision, not a
+  drive-by in one module.
+- `LLMClient.generate` treats three non-httpx failures as 502 rather than letting them reach the
+  catch-all 500, since all three mean "upstream is broken": a 200 with a non-JSON body
+  (`json.JSONDecodeError` is a `ValueError`, so neither httpx branch caught it); a borrowed
+  `AsyncClient` closed by its owner before the call (httpx raises a bare `RuntimeError`, guarded
+  by an `is_closed` check rather than `except RuntimeError`, which would swallow real bugs); and
+  a non-`str` value where the candidate text should be. The first two used to escape as opaque
+  500s, contradicting the module's stated contract.
 - A last-resort `@app.exception_handler(Exception)` returns a generic 500 envelope so
   nothing unforeseen leaks internals.
 - Removed the old `OSError → 404` handler (the request path no longer touches the
@@ -490,6 +507,89 @@ documents→chunks→vectors). Registration and login-username races collapse to
 - Consequence: installing with plain `pip install .` would still fetch the CUDA build —
   uv is the supported install path (already the case, see *Dependency management: uv*).
 - Revert condition: a GPU box for embedding throughput.
+
+**Retrieval-evaluation golden set (2026-07-29).**
+- The eval corpus is the FastAPI English docs (`evaluation/corpus/fastapi-docs/`, 154 files),
+  MIT-licensed and vendored verbatim at pinned commit `628663f`; `LICENSE.fastapi` +
+  `ATTRIBUTION.md` sit beside it to satisfy the license's attribution condition.
+  `release-notes.md` was dropped — a changelog of near-identical entries, 47% of the corpus
+  by size, which would have dominated embedding cost and added only near-duplicate distractors.
+- Goldens (`evaluation/goldens.jsonl`) are **quote-anchored, not offset-anchored**: each answer
+  names a document and a verbatim quote, resolved to char offsets at load time. This is what
+  keeps the set valid across the chunk-size sweep — integer offsets would silently rot when the
+  corpus changes, and every metric downstream would be wrong with no error.
+- Quotes must be copied from the **raw Markdown**, never from the rendered docs site: the site
+  strips `**bold**`, backticks and `<abbr>` tags, so site-copied quotes resolve to zero matches.
+- `occurrence` is explicit on every answer and the loader **fails loud** when the match count
+  disagrees, rather than taking the first hit. Non-hypothetical: the deployment-concepts bullet
+  list appears twice in `deployment/docker.md` and twice in `deployment/concepts.md`.
+- Each golden carries a `tier`: `lexical` (phrased near-identically to the source), `paraphrase`
+  (reworded), `needle` (one fact stated in exactly one place), `unanswerable` (no gold spans).
+  Lexical goldens are a regression floor only; they saturate at ~1.0 across all chunk sizes, so
+  aggregating them into the headline number would hide the effect the sweep exists to measure.
+  Report tiers separately.
+- Three further tiers added 2026-08-07, each isolating a failure the four original tiers cannot
+  distinguish. Same rule as `lexical`: **report separately, never average into one number.**
+  - `vocabulary-shift` — the question is asked by someone who does not know the doc's vocabulary,
+    so the key term is **absent from the query** ("how do I stop one slow request from freezing
+    everything else" for the `async`/threadpool passage). Paraphrase goldens still share content
+    words with their spans; these deliberately do not, which is the only way to see embedding
+    quality separately from lexical overlap. Enforced when authoring: a query whose content words
+    (minus stopwords) overlap its own gold spans is not a vocabulary shift and must be reworded —
+    two of the six drafted here failed that check and were rewritten.
+  - `multi-hop` — needs ≥ 2 spans, ideally in different documents (4 of the 6 are cross-document).
+    This is the **only tier where recall < 1.0 is the expected result**: `recall()` divides by the
+    number of gold spans, so retrieving one hop of two scores exactly 0.5. That is the measurement,
+    not a regression. It also means multi-hop cannot share a mean with the single-span tiers.
+  - `distractor` — a term with more than one sense in the corpus, where the wrong sense has far
+    more surface area than the right one: "dependency" (packages vs. dependency injection),
+    "environment" (virtual env vs. env var), "scope" (`Depends(scope=…)` vs. an entire OAuth2
+    scopes document), "header", "client", "root". Measures whether top-k is polluted by the wrong
+    sense — invisible to every other tier, since they have no competing sense to lose to.
+- `q-019` does not exist and the gap is deliberate. IDs are the join key for recorded sweep
+  results; renumbering to close the gap would silently re-point them.
+- `q-018` ("can I use a FastAPI app as an MCP server") stays `unanswerable` even though
+  `tutorial/server-sent-events.md` names MCP. The doc mentions MCP as an SSE-over-`POST` consumer
+  and says nothing about serving one, so the mention is a lexical decoy with no answer behind it.
+  That makes it a better unanswerable, not a broken one.
+- `unanswerable` goldens are stored but **excluded from retrieval metrics**. Not a preference:
+  `recall()` ends in `cnt / len(golden_spans)` and raises `ZeroDivisionError` on an empty list,
+  while `precision()` and `reciprocal_rank()` return a constant `0.0` no matter what comes back.
+  They carry no retrieval signal. They become useful at the *answer* layer later ("does the model
+  decline instead of inventing"), which is a different measurement. The filter lives in
+  `evaluation/evaluation_script.py`, not the loader: the loader loads what is on disk, the
+  consumer decides what it scores.
+- The loader requires **word-boundary matches**, not just `count == occurrence`. A truncated quote
+  is still a legal substring, so it resolves silently and shifts every offset after it — the one
+  failure mode fail-loud counting does not catch. Non-hypothetical: a golden quoting
+  `or example, if you need to store it in a database.` (missing the leading `F`) passed validation
+  and produced a span starting mid-word.
+- A gold span must be text that genuinely answers the query. Weak "related" passages are not
+  added just to make a query multi-document — they inflate the recall denominator and penalise
+  every chunk size equally, for no signal.
+- Gold spans are kept **short** (currently ≤ 244 chars). `is_relevant()` normalises coverage by
+  *gold* span length, so a gold longer than a chunk can never reach `tau` from a single chunk, and
+  precision/MRR would be structurally depressed at the small end of the sweep. This is a
+  constraint on the data, not a fix for the metric — whether relevance should mean "chunk covers
+  most of the gold" or "gold covers most of the chunk" is still open.
+- `occurrence` is the expected **total match count**, not a 1-based index (settled 2026-08-07 when
+  the loader was written). `_resolve_answer` raises unless `len(matches) == occurrence` and then
+  takes the last match, so a quote that is meant to be unique and is not fails instead of silently
+  resolving. Overlapping matches are counted. All 76 quotes are at `occurrence: 1` today, i.e. the
+  field currently asserts uniqueness; a quote that legitimately repeats must either be extended
+  until unique or have its true count recorded.
+- Document identity across the eval is the **corpus-relative POSIX path** under
+  `corpus/fastapi-docs/` (`tutorial/query-params.md`), not the basename. It is the join key between
+  a golden's `document` field and `Document.filename`, which is what `Span.doc_name` carries and
+  what `covered_len` filters on — and basenames collide four ways in this corpus (`index.md`,
+  `middleware.md`, `first-steps.md`, `websockets.md`), three of them referenced by goldens.
+- The loader lives in `evaluation/evaluation_script.py`, not `src/rag_app/eval/`: it is corpus-shaped
+  glue, not library code, and `src/rag_app/eval/` stays metrics-only.
+- The sweep's `cleanup()` deletes **per tenant inside an RLS-scoped session**. `documents` is FORCE
+  RLS under `owner_isolation`, so a `DELETE ... WHERE owner_id IN (...)` from a session that never
+  sets `app.owner_id` compares against NULL, matches zero rows and reports success — the sweep
+  looked clean while leaving its whole corpus behind, five copies at a time. Any future maintenance
+  query against a tenant-scoped table has the same trap.
 
 ---
 
