@@ -101,8 +101,19 @@ def gemini_response(text: str) -> dict:
 
 def gemini_blocked() -> dict:
     """200 with no usable candidate (safety block / empty) — should trip
-    LLMClient._extract_text into its RuntimeError."""
+    LLMClient._extract_text into LLMBadAnswer."""
     return {"candidates": []}
+
+
+def gemini_non_json_handler(body: str = "<html>502 Bad Gateway</html>"):
+    """Handler returning a 200 whose body isn't JSON (gateway page, truncated response).
+    Not a body helper like the two above: the point is that it never reaches json-encoding,
+    so it can't go through the `make_handler` used in test_llm_client."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body)
+
+    return handler
 
 
 def make_mock_llm_client(handler) -> tuple[httpx.AsyncClient, LLMClient]:
@@ -111,3 +122,13 @@ def make_mock_llm_client(handler) -> tuple[httpx.AsyncClient, LLMClient]:
     and handles teardown."""
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return client, LLMClient(model="fake", base_url="http://test", client=client)
+
+
+async def make_closed_llm_client() -> LLMClient:
+    """An LLMClient whose borrowed AsyncClient has already been closed — the shutdown-ordering
+    case. Returns only the LLMClient: the client is closed, so there's nothing left to tear down."""
+    client, llm = make_mock_llm_client(
+        lambda req: httpx.Response(200, json=gemini_response("x"))
+    )
+    await client.aclose()
+    return llm

@@ -71,17 +71,19 @@ async def test_e2e(
 
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "Life is beautiful.", doc.id, 0),
-        ChunkDTO(ch_ids[1], "Sun is shining", doc.id, 1),
-        ChunkDTO(ch_ids[2], "Night and day are late.", doc.id, 2),
-        ChunkDTO(ch_ids[3], "He is mean.", doc.id, 3),
+        ChunkDTO(ch_ids[0], "Life is beautiful.", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "Sun is shining", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "Night and day are late.", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "He is mean.", doc.id, 3, 0, 0),
         ChunkDTO(
             ch_ids[4],
             "Meaning of life is someting noone can answer excpet C++",
             doc.id,
             4,
+            0,
+            0,
         ),
-        ChunkDTO(ch_ids[5], "Car ate my dog.", doc.id, 5),
+        ChunkDTO(ch_ids[5], "Car ate my dog.", doc.id, 5, 0, 0),
     ]
     vectors = embedder.embed_document([ch.content for ch in chunks])
 

@@ -90,12 +90,12 @@ async def test_chunk_store_roundtrip_by_ids(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -129,12 +129,12 @@ async def test_chunk_store_roundtrip_by_doc_id(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -171,12 +171,12 @@ async def test_vec_store_one_vector_roundtrip(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     # commit doc+chunks first so the FK (Vector.chunk_id -> chunks.id) is satisfied.
@@ -201,12 +201,12 @@ async def test_vec_store_vectors_roundtrip(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -239,12 +239,12 @@ async def test_vec_store_wrong_dim(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     with pytest.raises(ValueError):
@@ -265,12 +265,12 @@ async def test_vec_store_get_values_by_chunk_id_eror(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -303,12 +303,12 @@ async def test_vec_store_search(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -367,12 +367,12 @@ async def test_vec_store_search_k_bigger_than_db_records(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for i in range(6)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
-        ChunkDTO(ch_ids[2], "ghi", doc.id, 2),
-        ChunkDTO(ch_ids[3], "jkl", doc.id, 3),
-        ChunkDTO(ch_ids[4], "mno", doc.id, 4),
-        ChunkDTO(ch_ids[5], "prs", doc.id, 5),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
+        ChunkDTO(ch_ids[2], "ghi", doc.id, 2, 0, 0),
+        ChunkDTO(ch_ids[3], "jkl", doc.id, 3, 0, 0),
+        ChunkDTO(ch_ids[4], "mno", doc.id, 4, 0, 0),
+        ChunkDTO(ch_ids[5], "prs", doc.id, 5, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -427,8 +427,8 @@ async def test_doc_store_remove_cascades_to_chunks_and_vectors(
     await doc_store.add_document(session, doc)
     ch_ids = [uuid4() for _ in range(2)]
     chunks = [
-        ChunkDTO(ch_ids[0], "abc", doc.id, 0),
-        ChunkDTO(ch_ids[1], "def", doc.id, 1),
+        ChunkDTO(ch_ids[0], "abc", doc.id, 0, 0, 0),
+        ChunkDTO(ch_ids[1], "def", doc.id, 1, 0, 0),
     ]
     await chunk_store.add_chunks(session, chunks)
     await session.commit()
@@ -468,20 +468,33 @@ async def test_vector_store_threshold(
             "Python 3.14 introduced some new feature regarding GIL",
             doc.id,
             0,
+            0,
+            0,
         ),
-        ChunkDTO(ch_ids[1], "The sun is shining bright", doc.id, 1),
+        ChunkDTO(ch_ids[1], "The sun is shining bright", doc.id, 1, 0, 0),
         ChunkDTO(
             ch_ids[2],
             "Python is a good programming language and it is also interpreted",
             doc.id,
             2,
+            0,
+            0,
         ),
-        ChunkDTO(ch_ids[3], "Water is blue and ocean has a lot of water", doc.id, 3),
+        ChunkDTO(
+            ch_ids[3],
+            "Water is blue and ocean has a lot of water",
+            doc.id,
+            3,
+            0,
+            0,
+        ),
         ChunkDTO(
             ch_ids[4],
             "Dogs and cats live at home except sometimes they don't.",
             doc.id,
             4,
+            0,
+            0,
         ),
     ]
     await chunk_store.add_chunks(session, chunks)
