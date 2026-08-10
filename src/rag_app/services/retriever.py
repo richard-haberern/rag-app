@@ -34,8 +34,13 @@ class RetrievalService:
         self, session: AsyncSession, query: str, k: int, threshold: float
     ) -> list[tuple[ChunkDTO, str]]:
         # add_special_tokens=False matches max_size (the content-token window the chunker uses).
+        # verbose=False for the same reason as in Chunker.chunk_text: an over-window query is
+        # measured here, not fed to the model, so the length warning would be misleading noise
+        # on the way to a clean QueryTooLong.
         q_size = len(
-            self.chunker.tokenizer(query, add_special_tokens=False)["input_ids"]
+            self.chunker.tokenizer(query, add_special_tokens=False, verbose=False)[
+                "input_ids"
+            ]
         )
         if q_size > self.chunker.max_size:
             raise QueryTooLong(

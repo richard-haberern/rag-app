@@ -35,7 +35,10 @@ class FakeTokenizer:
         text: str,
         return_offsets_mapping: bool = False,
         add_special_tokens: bool = False,
+        verbose: bool = True,
     ) -> dict[str, list]:
+        # verbose is accepted and ignored: callers pass verbose=False to mute the real
+        # tokenizer's over-window advisory, which this fake never emits anyway.
         spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
         out: dict[str, list] = {"input_ids": list(range(len(spans)))}
         if return_offsets_mapping:

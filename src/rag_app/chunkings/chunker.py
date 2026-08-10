@@ -27,8 +27,13 @@ class Chunker:
         self.overlap = overlap
 
     def chunk_text(self, text: str) -> list[ChunkOffsets]:
+        # verbose=False: we deliberately tokenize the whole document, which is far longer than
+        # the model window, because all we want is offset_mapping - these ids never reach the
+        # model, only the sliced <=max_size chunks do. Without it transformers logs a bogus
+        # "sequence length is longer than the specified maximum" warning about a truncation
+        # that isn't happening here (sentence-transformers lowers model_max_length to 256).
         out = self.tokenizer(
-            text, return_offsets_mapping=True, add_special_tokens=False
+            text, return_offsets_mapping=True, add_special_tokens=False, verbose=False
         )
         offsets = out["offset_mapping"]
         # guarded also at ingestor with checking for empty doc, but chunker itself has to be safe
