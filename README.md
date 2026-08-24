@@ -5,7 +5,7 @@ document, splits it into chunks, embeds them locally, and stores the vectors. At
 query time it retrieves the most relevant chunks and grounds an LLM's answer in
 them — so answers are tied to your source material, not the model's training data.
  
-Built backend-first, it's deployed on [Hugging Face Spaces](https://haberric-rag-app-v1.hf.space).
+Built backend-first, it's deployed on [Hugging Face Spaces](https://haberric-groundwork.hf.space/).
  
 ## Highlights
  
