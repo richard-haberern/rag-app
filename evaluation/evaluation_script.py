@@ -262,8 +262,10 @@ def report(results: list[dict]) -> None:
                     cells += f"{mean:>7.0f}" if metric == "chars" else f"{mean:>7.2f}"
                 print(f"  chunk {ch_size:>4}  {cells}")
     print(
-        "\nNo cross-tier total by design: lexical saturates near 1.0 and multi-hop is capped at 0.5"
-        "\nwhen one hop of two is retrieved, so a single mean hides the effect the sweep measures."
+        "\nNo cross-tier total by design: the tiers move in opposite directions under chunk size"
+        "\n(254-token chunks take needle from 0.46 to 1.00 while costing paraphrase and distractor"
+        "\nrecall), and multi-hop scores exactly 0.5 per query when one hop of two is retrieved --"
+        "\nso a single mean cancels the effects the sweep exists to measure."
     )
 
 
