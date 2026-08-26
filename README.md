@@ -9,6 +9,11 @@ Built backend-first, it's deployed on [Hugging Face Spaces](https://haberric-gro
  
 ## Highlights
  
+- **Measured retrieval, not assumed** — a golden set of 45 quote-anchored questions over a
+  154-document corpus, stratified into 7 query tiers, scored with recall / precision / MRR
+  implemented over character spans. The shipped chunk size and top-k were picked from a
+  20-configuration sweep, and the tier that retrieval handles *worst* is published alongside
+  the one it handles best. See [Evaluation](#evaluation).
 - **Multi-tenant with real auth** — username/password (argon2) plus one-click anonymous
   sessions, opaque DB-backed session tokens, and Postgres row-level security so every tenant
   sees only its own documents. All credential/session writes go through `SECURITY DEFINER`
@@ -223,7 +228,9 @@ src/rag_app/
   embeddings/   # sentence-transformers wrapper
   llm/          # LLM client + factory + prompter
   db/           # engine, base
+  eval/         # retrieval metrics: Span, recall, precision, MRR (library code, corpus-agnostic)
   static/       # homepage + web app UI: auth, account & document management, ingest/ask (plain HTML/CSS/JS, no build step)
+evaluation/     # golden set + sweep harness: goldens.jsonl, evaluation_script.py, corpus/
 alembic/        # migrations: initial RLS schema, HNSW index, auth schema + SQL functions
 functions.sql   # reference copy of the SECURITY DEFINER auth functions (installed by the migration)
 tests/
@@ -263,6 +270,127 @@ CI (`.github/workflows/ci.yaml`) runs the same sequence against a committed `.en
 
 ---
 
+## Evaluation
+
+Retrieval quality is **measured, not asserted**. The tests above prove the pipeline is
+*correct*; this proves it *works* — and bounds how well. Full rationale for every choice
+below lives in [`DECISIONS.md`](./DECISIONS.md) → *Retrieval-evaluation golden set*.
+
+Retrieval recall is a **ceiling on end-to-end quality**: what retrieval misses, generation
+cannot recover.
+
+### The golden set
+
+`evaluation/goldens.jsonl` — **45 questions, 76 gold spans**, over the FastAPI English docs
+(`evaluation/corpus/fastapi-docs/`, 154 files, MIT, vendored verbatim at pinned commit
+`628663f`). `release-notes.md` was dropped: a changelog of near-identical entries, 47% of the
+corpus by size, that would have dominated embedding cost and contributed only near-duplicates.
+
+Two decisions do the load-bearing work:
+
+- **Goldens are quote-anchored, not offset-anchored.** Each answer names a document and a
+  *verbatim quote*, resolved to character offsets at load time. Integer offsets would rot
+  silently the moment the corpus changed — and every metric downstream would be wrong with no
+  error. Quotes must come from the raw Markdown, never the rendered docs site, which strips
+  `**bold**`, backticks and `<abbr>` tags.
+- **The loader fails loud.** `occurrence` is the expected *total* match count, not an index, and
+  a disagreement raises rather than taking the first hit. Matches must also land on **word
+  boundaries** — a truncated quote is still a legal substring, so it resolves silently and shifts
+  every offset after it. That is the one failure mode counting alone does not catch.
+
+### Query tiers
+
+Each golden carries a tier isolating a distinct failure mode. Tiers are **reported separately,
+never averaged into one number** — they move in *opposite directions* under chunk size, so a
+single mean cancels the effect the sweep exists to measure.
+
+| tier | n | what it isolates | recall@8 |
+|---|---|---|---|
+| `needle` | 4 | one fact stated in exactly one place | 1.00 |
+| `paraphrase` | 10 | the question reworded | 0.75 |
+| `multi-hop` | 6 | needs ≥2 spans, 4 of 6 cross-document | 0.75 |
+| `lexical` | 8 | phrased near-identically to the source — a regression floor | 0.58 |
+| `vocabulary-shift` | 7 | the key term is **absent from the query** | 0.43 |
+| `distractor` | 6 | a term whose wrong sense has more surface area than the right one | 0.42 |
+| `unanswerable` | 4 | no gold spans — **excluded from retrieval metrics** | — |
+
+Scored at the shipped config (192-token chunks, k=8) over the 41 scored goldens.
+
+- `vocabulary-shift` is the only tier that sees embedding quality separately from lexical
+  overlap, since paraphrase goldens still share content words with their spans. Enforced when
+  authoring: a query whose content words overlap its own gold spans is not a vocabulary shift.
+- `multi-hop` is the **only tier where recall < 1.0 is the expected result** — `recall()` divides
+  by the number of gold spans, so retrieving one hop of two scores exactly 0.5. That is the
+  measurement, not a regression.
+- `unanswerable` goldens are stored but carry no retrieval signal: `recall()` would divide by
+  zero and precision/MRR return a constant `0.0`. They become useful at the *answer* layer
+  ("does the model decline instead of inventing"), which is a different measurement.
+
+### Metrics
+
+`src/rag_app/eval/metrics.py` — recall, precision and MRR computed over **character spans**, not
+chunk ids, so they survive re-chunking. A chunk counts as relevant when it covers ≥ τ = 0.5 of a
+gold span. **Mean characters retrieved** is reported next to every recall number: recall bought
+by raising k is paid for in context, and quoting one without the other is dishonest.
+
+### The sweep
+
+`evaluation/evaluation_script.py` ingests the corpus at 4 chunk sizes and scores every golden at
+5 values of k. Aggregate recall, micro-averaged over the 41 scored goldens:
+
+| chunk | k=2 | k=4 | k=6 | k=8 | k=10 |
+|---|---|---|---|---|---|
+| 64 | 0.385 | 0.446 | 0.528 | 0.535 | 0.581 |
+| 128 | 0.297 | 0.384 | 0.499 | 0.571 | 0.615 |
+| **192** | 0.397 | 0.508 | 0.578 | **0.638** | 0.662 |
+| 254 | 0.403 | 0.482 | 0.627 | 0.746 | 0.746 |
+
+**Chunk size and k interact as a threshold, not a trade-off.** At 64 and 128 tokens the gold span
+is fragmented so no chunk clears τ, and `needle` recall is *completely inert to k* — 0.46 and 0.50
+respectively, unchanged from k=2 all the way to k=10. More retrieved context cannot fix a chunking
+failure. Above that floor k starts paying: 192-token chunks reach 1.00 on `needle` by k=8.
+
+### Why 192 / k=8 ships
+
+Set via `CHUNK_SIZE=192` and `RETRIEVAL_TOP_K=8`. **254/k=8 has the higher aggregate recall**
+(0.746 vs 0.638) and was rejected anyway:
+
+| | vocabulary-shift | multi-hop | chars retrieved |
+|---|---|---|---|
+| 192 / k=8 | **0.43** | **0.75** | **5,204** |
+| 254 / k=8 | 0.36 | 0.67 | 6,666 |
+
+192 wins the two tiers that most resemble how questions actually get asked, on **22% less
+context**. The aggregate is carried by `lexical` and `distractor` — the least representative
+tiers — so optimising the headline number would have optimised the wrong thing.
+
+### What these numbers do not say
+
+- **n = 41.** The unpaired standard error is ≈ 0.07, so the 0.746 vs 0.638 aggregate gap is
+  *inside the noise*. The config choice rests on the per-tier pattern, not the headline. A paired
+  test over the per-query rows would settle it and has not been run.
+- **`retrieval_threshold` was never swept** — held at 0.7 throughout, the one dimension the sweep
+  does not cover. It was checked for confounding: 92–110% of expected chunks return at k=10 across
+  every tier, so the gate is not truncating before k and the 0.43 `vocabulary-shift` ceiling is a
+  ranking limit, not a threshold artifact.
+- **This measures retrieval, not answers.** Precision sits at ≈ 0.14, so most of what reaches the
+  prompt is irrelevant; whether that pollution degrades generation is a separate measurement.
+- **MRR is flat (≈ 0.47–0.49) while recall climbs 0.30 → 0.75 across k.** The right chunks are
+  being retrieved but ranked deep — which is exactly the signal that cross-encoder reranking would
+  pay off, and why it is the next lever rather than a nice-to-have.
+
+### Running it
+
+```bash
+# Same Postgres as the test suite (see Testing above), plus the real embedding model.
+uv run python -m evaluation.evaluation_script
+```
+
+Goldens are resolved *before* the corpus is ingested, so a bad quote fails in a second rather
+than after embedding 154 documents at four chunk sizes.
+
+---
+
 ## Status & roadmap
 
 - **v2 — complete.** Ingest → chunk → embed → store → retrieve → prompt → answer,
@@ -273,7 +401,9 @@ CI (`.github/workflows/ci.yaml`) runs the same sequence against a committed `.en
 - **Deployed** on Hugging Face Spaces against a managed Postgres with pgvector.
 - **Next (v3):** a second CSRF factor (explicit `Origin` check) + rate-limiting for non-browser
   callers, a supported iframe-embed path.
-- **Deferred by design:** cross-encoder reranking, document upload
+- **Deferred by design:** cross-encoder reranking (deferred with evidence — see
+  [Evaluation](#evaluation): flat MRR against climbing recall is the signal it would pay off),
+  document upload
 
 ---
 
