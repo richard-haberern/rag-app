@@ -525,9 +525,12 @@ documents→chunks→vectors). Registration and login-username races collapse to
   list appears twice in `deployment/docker.md` and twice in `deployment/concepts.md`.
 - Each golden carries a `tier`: `lexical` (phrased near-identically to the source), `paraphrase`
   (reworded), `needle` (one fact stated in exactly one place), `unanswerable` (no gold spans).
-  Lexical goldens are a regression floor only; they saturate at ~1.0 across all chunk sizes, so
-  aggregating them into the headline number would hide the effect the sweep exists to measure.
-  Report tiers separately.
+  Lexical goldens are a regression floor only. They do **not** saturate — the first full sweep
+  (2026-08-26) measured them at 0.40–0.88 recall, *below* paraphrase in several configs, so the
+  earlier "~1.0 across all chunk sizes" claim was simply wrong and is retracted here. Reporting
+  tiers separately still stands, on a stronger reason: the tiers move in **opposite directions**
+  under chunk size (254-token chunks take `needle` from 0.46 to 1.00 while costing `paraphrase`
+  and `distractor` recall), so a single mean cancels the effect the sweep exists to measure.
 - Three further tiers added 2026-08-07, each isolating a failure the four original tiers cannot
   distinguish. Same rule as `lexical`: **report separately, never average into one number.**
   - `vocabulary-shift` — the question is asked by someone who does not know the doc's vocabulary,
@@ -590,6 +593,30 @@ documents→chunks→vectors). Registration and login-username races collapse to
   sets `app.owner_id` compares against NULL, matches zero rows and reports success — the sweep
   looked clean while leaving its whole corpus behind, five copies at a time. Any future maintenance
   query against a tenant-scoped table has the same trap.
+
+**Shipped retrieval config: 192-token chunks, top-k 8 (2026-08-26).**
+- Set in the environment (`CHUNK_SIZE=192`, `RETRIEVAL_TOP_K=8`). The `config.py` defaults are
+  deliberately left at `chunk_size=None` (the model's full 254-token window) and
+  `retrieval_top_k=5`, so the deployed values live in one place and the code keeps a
+  model-agnostic fallback.
+- Chosen over **254/k=8, which has the higher aggregate recall** (0.746 vs 0.638, micro-averaged
+  over the 41 scored goldens). 192/k=8 wins the two tiers that most resemble how questions are
+  actually asked — `vocabulary-shift` 0.43 vs 0.36 and `multi-hop` 0.75 vs 0.67 — on **22% less
+  retrieved context** (5,204 vs 6,666 chars). The aggregate is carried by `lexical` and
+  `distractor`, where 254 wins and which are the least representative tiers. Optimising the
+  headline number here would have optimised the wrong thing.
+- **The aggregate gap is not statistically separable.** With 41 queries the unpaired standard
+  error is ~0.07, so 0.746 vs 0.638 is inside the noise. The decision rests on the per-tier
+  pattern, not on the headline. A paired test over the per-query rows (they exist in the
+  `results` list before `report()` aggregates them) would settle it and is not yet done.
+- `retrieval_threshold` stayed at 0.7 and was **never swept** — the one dimension the sweep does
+  not cover. It was checked for confounding: 92-110% of the expected chunks come back at k=10
+  across every tier, so the gate is not truncating before k, and the 0.43 `vocabulary-shift`
+  ceiling is a ranking limit rather than a threshold artifact.
+- **Revert condition: a cross-encoder reranker.** MRR is flat (~0.47-0.49) while recall climbs
+  0.30 -> 0.75 across k, i.e. the right chunks are being retrieved but ranked deep. Reranking
+  top-8 down to top-3 should hold recall at much lower context, at which point this chunk/k
+  choice should be re-measured rather than assumed.
 
 ---
 
